@@ -12,6 +12,7 @@
 
 #include <clang/AST/AST.h>
 #include <clang/AST/ASTConsumer.h>
+#include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -117,6 +118,30 @@ namespace TRAFO_NAMESPACE
         // meta data
         class MetaData
         {
+            struct AccessSpecifier
+            {
+                const AccessSpecDecl& decl;
+                const SourceLocation sourceLocation;
+                const SourceRange sourceRange;
+                const SourceLocation scopeBegin;
+                AccessSpecifier(const AccessSpecDecl& decl)
+                    :
+                    decl(decl),
+                    sourceLocation(decl.getAccessSpecifierLoc()),
+                    sourceRange(decl.getSourceRange()),
+                    scopeBegin(decl.getColonLoc().getLocWithOffset(1))
+                { ; }
+            };
+
+            struct Constructor
+            {
+                const CXXConstructorDecl& decl;
+                Constructor(const CXXConstructorDecl& decl)
+                    :
+                    decl(decl)
+                { ; }
+            };
+
             struct MemberField
             {
                 const FieldDecl& decl;
@@ -134,34 +159,28 @@ namespace TRAFO_NAMESPACE
                 { ; }
             };
 
-            struct Constructor
-            {
-                const CXXConstructorDecl& decl;
-                Constructor(const CXXConstructorDecl& decl)
-                    :
-                    decl(decl)
-                { ; }
-            };
-
         public:
 
-            std::string className;
+            std::string name;
             bool isTemplateClass;
             bool isTemplateClassDefinition;
-            std::size_t numFields;
-            std::vector<MemberField> publicFields;
-            std::vector<MemberField> privateFields;
-            bool hasNonFundamentalPublicFields;
-            bool hasMultiplePublicFieldTypes;
+            std::vector<AccessSpecifier> publicAccess;
+            std::vector<AccessSpecifier> privateAccess;
             std::vector<Constructor> publicConstructors;
             std::vector<Constructor> privateConstructors;
+            std::vector<MemberField> publicFields;
+            std::vector<MemberField> privateFields;
+            std::size_t numFields;
+            bool hasNonFundamentalPublicFields;
+            bool hasMultiplePublicFieldTypes;
             bool isProxyClassCandidate;
+
         } classInfo;
 
         // implementation
         void collectMetaInformation(const CXXRecordDecl& decl, ASTContext& context)
         {
-            classInfo.className = decl.getNameAsString();
+            classInfo.name = decl.getNameAsString();
 
             // classInfo.isTemplateClass has been set already
             // classInfo.isTemplateClassDefinition has been set already
@@ -179,8 +198,7 @@ namespace TRAFO_NAMESPACE
             {
                 // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
             #define MATCH(MODIFIER, VARIABLE) \
-                match(context, classInfo.isTemplateClass ? fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.className), unless(isTemplateInstantiation())))))).bind("fieldDecl") \
-                                                         : fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("fieldDecl"), \
+                match(context, fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
                     [&] (const MatchFinder::MatchResult& result) mutable \
                     { \
                         if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl")) \
@@ -191,8 +209,7 @@ namespace TRAFO_NAMESPACE
                             const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
                             VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
                         } \
-                    } \
-                )
+                    })
                 
                 MATCH(isPublic, classInfo.publicFields);
                 classInfo.isProxyClassCandidate &= (classInfo.publicFields.size() > 0);
@@ -211,24 +228,32 @@ namespace TRAFO_NAMESPACE
                 classInfo.hasMultiplePublicFieldTypes |= (field.typeName != typeName);
             }
             // proxy class candidates must have fundamental public fields
-            classInfo.isProxyClassCandidate &= !classInfo.hasNonFundamentalPublicFields;// || classInfo.hasMultiplePublicFieldTypes);
+            classInfo.isProxyClassCandidate &= !classInfo.hasNonFundamentalPublicFields;
 
             // everything below is executed only of this class is a proxy class candidate
             if (classInfo.isProxyClassCandidate)
             {
+                // match public and private access specifier
+                match(context, accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
+                    [&] (const MatchFinder::MatchResult& result) mutable \
+                    {
+                        if (const AccessSpecDecl* decl = result.Nodes.getNodeAs<AccessSpecDecl>("accessSpecDecl"))
+                        {
+                            classInfo.publicAccess.emplace_back(*decl);
+                        }
+                    });
+                
                 // match all (public, private) constructors
             #define MATCH(MODIFIER, VARIABLE) \
-                match(context, classInfo.isTemplateClass ? cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.className), unless(isTemplateInstantiation())))))).bind("constructorDecl") \
-                                                         : cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("constructorDecl"), \
+                match(context, cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
                     [&] (const MatchFinder::MatchResult& result) mutable \
                     { \
                         if (const CXXConstructorDecl* decl = result.Nodes.getNodeAs<CXXConstructorDecl>("constructorDecl")) \
                         { \
                             VARIABLE.emplace_back(*decl); \
                         } \
-                    } \
-                )
-
+                    })
+                    
                 MATCH(isPublic, classInfo.publicConstructors);
                 MATCH(isPrivate, classInfo.privateConstructors);
             #undef MATCH
@@ -238,11 +263,11 @@ namespace TRAFO_NAMESPACE
         std::string createProxyClassStandardConstructor(const CXXRecordDecl& decl) const
         {
             // CONTINUE HERE
-            std::string constructor = classInfo.className + "_proxy(";
+            std::string constructor = classInfo.name + "_proxy(";
 
             if (classInfo.hasMultiplePublicFieldTypes)
             {
-
+                std::cerr << classInfo.name << ": createProxyClassStandardConstructor: not implemented yet" << std::endl;
             }
             else
             {
@@ -257,8 +282,8 @@ namespace TRAFO_NAMESPACE
         void generateProxyClass(const CXXRecordDecl& decl, ASTContext& context)
         {
             // replace class name
-            rewriter.ReplaceText(decl.getLocation(), classInfo.className + "_proxy");
-                    
+            rewriter.ReplaceText(decl.getLocation(), classInfo.name + "_proxy");
+
             // remove original constructors
             for (auto ctor : decl.ctors())
             {
@@ -273,8 +298,9 @@ namespace TRAFO_NAMESPACE
             }
             else
             {
-                const SourceLocation endOfClassDefinition = decl.getBraceRange().getEnd();//.getLocWithOffset(1)
-                rewriter.InsertText(endOfClassDefinition, "public:\n\t" + constructor, true, true);
+                const SourceLocation location = (classInfo.publicAccess.size() > 0 ? classInfo.publicAccess[0].scopeBegin : decl.getBraceRange().getEnd());
+                const std::string prefix = (classInfo.publicAccess.size() > 0 ? "\n\t" : "public:\n\t");
+                rewriter.InsertText(location, prefix + constructor, true, true);
             }
 
             // public variables: add reference qualifier
@@ -301,7 +327,7 @@ namespace TRAFO_NAMESPACE
 
         virtual void addReferenceQualifierToPublicFields(Rewriter& rewriter, ASTContext& context)
         {
-            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("fieldDecl"),
+            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(classInfo.name))))).bind("fieldDecl"),
                 [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl"))
@@ -329,6 +355,8 @@ namespace TRAFO_NAMESPACE
 
                 if (classInfo.isProxyClassCandidate)
                 {      
+                    std::cout << "class " << classInfo.name << " has constructors: " << classInfo.publicConstructors.size() << ", " <<classInfo.privateConstructors.size() << std::endl;
+
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
                     baseClass::generateProxyClass(*decl, *result.Context);
                     rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
@@ -347,7 +375,7 @@ namespace TRAFO_NAMESPACE
 
         virtual void addReferenceQualifierToPublicFields(Rewriter& rewriter, ASTContext& context)
         {
-            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.className), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
+            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
                 [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl"))
@@ -376,6 +404,8 @@ namespace TRAFO_NAMESPACE
 
                 if (classInfo.isProxyClassCandidate)
                 {
+                    std::cout << "Tclass " << classInfo.name << " has constructors: " << classInfo.publicConstructors.size() << ", " <<classInfo.privateConstructors.size() << std::endl;
+
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
                     baseClass::generateProxyClass(*(decl->getTemplatedDecl()), *result.Context);
                     rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
