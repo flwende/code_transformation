@@ -23,6 +23,7 @@
 #include <clang/Tooling/Tooling.h>
 
 #include <misc/string_helper.hpp>
+#include <misc/rewriter.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -30,59 +31,55 @@
 
 namespace TRAFO_NAMESPACE
 {
-    using namespace clang;
-    using namespace clang::ast_matchers;
-    using namespace clang::driver;
-    using namespace clang::tooling;
     using namespace TRAFO_NAMESPACE::internal;
 
-    class ClassDefinition : public MatchFinder::MatchCallback
+    class ClassDefinition : public clang::ast_matchers::MatchFinder::MatchCallback
     {
     protected:
 
-        Rewriter& rewriter;
+        clang::Rewriter& rewriter;
 
         // generic handler definitions
-        class MyRewriter : public MatchFinder::MatchCallback
+        class MyRewriter : public clang::ast_matchers::MatchFinder::MatchCallback
         {
-            Rewriter& rewriter;
-            std::function<void(const MatchFinder::MatchResult&, Rewriter&)> kernel;
+            clang::Rewriter& rewriter;
+            std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, clang::Rewriter&)> kernel;
 
         public:
 
             template <typename F>
-            MyRewriter(Rewriter& rewriter, const F& kernel)
+            MyRewriter(clang::Rewriter& rewriter, const F& kernel)
                 :
                 rewriter(rewriter),
                 kernel(kernel)  
             { ; }
             
-            virtual void run(const MatchFinder::MatchResult& result)
+            virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
             {
                 kernel(result, rewriter);
             }
 
             template <typename T>
-            void matchAndModify(ASTContext& context, const T& match)
+            void matchAndModify(clang::ASTContext& context, const T& match)
             {
-                MatchFinder matcher;
+                clang::ast_matchers::MatchFinder matcher;
                 matcher.addMatcher(match, this);
                 matcher.matchAST(context);
             }
         };
 
         template <typename T, typename F>
-        void matchAndModify(ASTContext& context, const T& match, const F& kernel)
+        void matchAndModify(clang::ASTContext& context, const T& match, const F& kernel)
         {
             MyRewriter myRewriter(rewriter, kernel);
-            MatchFinder matcher;
+            clang::ast_matchers::MatchFinder matcher;
             matcher.addMatcher(match, &myRewriter);
             matcher.matchAST(context);
         }
 
-        class MyMatchFinder : public MatchFinder::MatchCallback
+        class MyMatchFinder : public clang::ast_matchers::MatchFinder::MatchCallback
         {
-            std::function<void(const MatchFinder::MatchResult&)> kernel;
+            std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&)> kernel;
 
         public:
 
@@ -92,25 +89,25 @@ namespace TRAFO_NAMESPACE
                 kernel(kernel)  
             { ; }
             
-            virtual void run(const MatchFinder::MatchResult& result)
+            virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
             {
                 kernel(result);
             }
 
             template <typename T>
-            void match(ASTContext& context, const T& match)
+            void match(clang::ASTContext& context, const T& match)
             {
-                MatchFinder matcher;
+                clang::ast_matchers::MatchFinder matcher;
                 matcher.addMatcher(match, this);
                 matcher.matchAST(context);
             }
         };
 
         template <typename T, typename F>
-        void match(ASTContext& context, const T& match, const F& kernel) const
+        static void match(clang::ASTContext& context, const T& match, const F& kernel)
         {
             MyMatchFinder myMatcher(kernel);
-            MatchFinder matcher;
+            clang::ast_matchers::MatchFinder matcher;
             matcher.addMatcher(match, &myMatcher);
             matcher.matchAST(context);
         }
@@ -120,11 +117,11 @@ namespace TRAFO_NAMESPACE
         {
             struct AccessSpecifier
             {
-                const AccessSpecDecl& decl;
-                const SourceLocation sourceLocation;
-                const SourceRange sourceRange;
-                const SourceLocation scopeBegin;
-                AccessSpecifier(const AccessSpecDecl& decl)
+                const clang::AccessSpecDecl& decl;
+                const clang::SourceLocation sourceLocation;
+                const clang::SourceRange sourceRange;
+                const clang::SourceLocation scopeBegin;
+                AccessSpecifier(const clang::AccessSpecDecl& decl)
                     :
                     decl(decl),
                     sourceLocation(decl.getAccessSpecifierLoc()),
@@ -135,8 +132,8 @@ namespace TRAFO_NAMESPACE
 
             struct Constructor
             {
-                const CXXConstructorDecl& decl;
-                Constructor(const CXXConstructorDecl& decl)
+                const clang::CXXConstructorDecl& decl;
+                Constructor(const clang::CXXConstructorDecl& decl)
                     :
                     decl(decl)
                 { ; }
@@ -144,12 +141,12 @@ namespace TRAFO_NAMESPACE
 
             struct MemberField
             {
-                const FieldDecl& decl;
+                const clang::FieldDecl& decl;
                 const bool isConst;
                 const bool isFundamentalOrTemplateType;
                 const std::string typeName;
                 const std::string name;
-                MemberField(const FieldDecl& decl, const bool isConst, const bool isFundamentalOrTemplateType, const std::string typeName, const std::string name)
+                MemberField(const clang::FieldDecl& decl, const bool isConst, const bool isFundamentalOrTemplateType, const std::string typeName, const std::string name)
                     :
                     decl(decl),
                     isConst(isConst),
@@ -159,11 +156,94 @@ namespace TRAFO_NAMESPACE
                 { ; }
             };
 
+            void collectMetaData()
+            {
+                // isTemplateClass has been set already
+                // isTemplateClassDefinition has been set already
+
+                // proxy class candidates should not have any of these properties: abstract, polymorphic, empty
+                isProxyClassCandidate = !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty());
+                // proxy class candidates must be class definitions and no specializations in case of template classes
+                // note: a template class specialization is of type CXXRecordDecl, and we need to check for its describing template class
+                //       (if it does not exist, then it is a normal C++ class)
+                if (!isTemplateClass) isProxyClassCandidate &= (decl.getDescribedClassTemplate() == nullptr);
+                if (!isProxyClassCandidate) return;
+                    
+                numFields = std::distance(decl.field_begin(), decl.field_end());
+                if (numFields > 0)
+                {
+                    // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
+                    using namespace clang::ast_matchers;
+                #define MATCH(MODIFIER, VARIABLE) \
+                    ClassDefinition::match(context, fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        { \
+                            if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
+                            { \
+                                const clang::QualType qualType = decl->getType(); \
+                                const bool isConstant = qualType.getQualifiers().hasConst(); \
+                                const clang::Type* type = qualType.getTypePtrOrNull(); \
+                                const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
+                                VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
+                            } \
+                        })
+                    
+                    MATCH(isPublic, publicFields);
+                    isProxyClassCandidate &= (publicFields.size() > 0);
+                    // proxy class candidates must have at least 1 public field
+                    if (!isProxyClassCandidate) return;
+                    MATCH(isPrivate, privateFields);
+                #undef MATCH
+                }
+
+                hasNonFundamentalPublicFields = false;
+                hasMultiplePublicFieldTypes = false;
+                const std::string typeName = publicFields[0].typeName;
+                for (auto field : publicFields)
+                {
+                    hasNonFundamentalPublicFields |= !(field.isFundamentalOrTemplateType);
+                    hasMultiplePublicFieldTypes |= (field.typeName != typeName);
+                }
+                // proxy class candidates must have fundamental public fields
+                isProxyClassCandidate &= !hasNonFundamentalPublicFields;
+
+                // everything below is executed only of this class is a proxy class candidate
+                if (isProxyClassCandidate)
+                {
+                    using namespace clang::ast_matchers;
+                    // match public and private access specifier
+                    ClassDefinition::match(context, accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        {
+                            if (const clang::AccessSpecDecl* decl = result.Nodes.getNodeAs<clang::AccessSpecDecl>("accessSpecDecl"))
+                            {
+                                publicAccess.emplace_back(*decl);
+                            }
+                        });
+                    
+                    // match all (public, private) constructors
+                #define MATCH(MODIFIER, VARIABLE) \
+                    ClassDefinition::match(context, cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        { \
+                            if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
+                            { \
+                                VARIABLE.emplace_back(*decl); \
+                            } \
+                        })
+                        
+                    MATCH(isPublic, publicConstructors);
+                    MATCH(isPrivate, privateConstructors);
+                #undef MATCH
+                }
+            }
+
         public:
 
-            std::string name;
+            const clang::CXXRecordDecl& decl;
+            clang::ASTContext& context;
+            const std::string name;
             bool isTemplateClass;
-            bool isTemplateClassDefinition;
             std::vector<AccessSpecifier> publicAccess;
             std::vector<AccessSpecifier> privateAccess;
             std::vector<Constructor> publicConstructors;
@@ -175,114 +255,47 @@ namespace TRAFO_NAMESPACE
             bool hasMultiplePublicFieldTypes;
             bool isProxyClassCandidate;
 
-        } classInfo;
+            MetaData(const clang::CXXRecordDecl& decl, clang::ASTContext& context, const bool isTemplateClass)
+                :
+                decl(decl),
+                context(context),
+                name(decl.getNameAsString()),                
+                isTemplateClass(isTemplateClass)
+            {
+                collectMetaData();
+            }
+        };
+
+        std::vector<MetaData> targetClasses;
 
         // implementation
-        void collectMetaInformation(const CXXRecordDecl& decl, ASTContext& context)
-        {
-            classInfo.name = decl.getNameAsString();
 
-            // classInfo.isTemplateClass has been set already
-            // classInfo.isTemplateClassDefinition has been set already
-
-            // proxy class candidates should not have any of these properties: abstract, polymorphic, empty
-            classInfo.isProxyClassCandidate = !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty());
-            // proxy class candidates must be class definitions and no specializations in case of template classes
-            // note: a template class specialization is of type CXXRecordDecl, and we need to check for its describing template class
-            //       (if it does not exist, then it is a normal C++ class)
-            classInfo.isProxyClassCandidate &= (classInfo.isTemplateClass ? classInfo.isTemplateClassDefinition : (decl.getDescribedClassTemplate() == nullptr));
-            if (!classInfo.isProxyClassCandidate) return;
-                
-            classInfo.numFields = std::distance(decl.field_begin(), decl.field_end());
-            if (classInfo.numFields > 0)
-            {
-                // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
-            #define MATCH(MODIFIER, VARIABLE) \
-                match(context, fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    { \
-                        if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl")) \
-                        { \
-                            const QualType qualType = decl->getType(); \
-                            const bool isConstant = qualType.getQualifiers().hasConst(); \
-                            const Type* type = qualType.getTypePtrOrNull(); \
-                            const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
-                            VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
-                        } \
-                    })
-                
-                MATCH(isPublic, classInfo.publicFields);
-                classInfo.isProxyClassCandidate &= (classInfo.publicFields.size() > 0);
-                // proxy class candidates must have at least 1 public field
-                if (!classInfo.isProxyClassCandidate) return;
-                MATCH(isPrivate, classInfo.privateFields);
-            #undef MATCH
-            }
-
-            classInfo.hasNonFundamentalPublicFields = false;
-            classInfo.hasMultiplePublicFieldTypes = false;
-            const std::string typeName = classInfo.publicFields[0].typeName;
-            for (auto field : classInfo.publicFields)
-            {
-                classInfo.hasNonFundamentalPublicFields |= !(field.isFundamentalOrTemplateType);
-                classInfo.hasMultiplePublicFieldTypes |= (field.typeName != typeName);
-            }
-            // proxy class candidates must have fundamental public fields
-            classInfo.isProxyClassCandidate &= !classInfo.hasNonFundamentalPublicFields;
-
-            // everything below is executed only of this class is a proxy class candidate
-            if (classInfo.isProxyClassCandidate)
-            {
-                // match public and private access specifier
-                match(context, accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    {
-                        if (const AccessSpecDecl* decl = result.Nodes.getNodeAs<AccessSpecDecl>("accessSpecDecl"))
-                        {
-                            classInfo.publicAccess.emplace_back(*decl);
-                        }
-                    });
-                
-                // match all (public, private) constructors
-            #define MATCH(MODIFIER, VARIABLE) \
-                match(context, cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    { \
-                        if (const CXXConstructorDecl* decl = result.Nodes.getNodeAs<CXXConstructorDecl>("constructorDecl")) \
-                        { \
-                            VARIABLE.emplace_back(*decl); \
-                        } \
-                    })
-                    
-                MATCH(isPublic, classInfo.publicConstructors);
-                MATCH(isPrivate, classInfo.privateConstructors);
-            #undef MATCH
-            }
-        }
-
-        std::string createProxyClassStandardConstructor(const CXXRecordDecl& decl) const
+        std::string createProxyClassStandardConstructor(MetaData& thisClass, const clang::CXXRecordDecl& decl) const
         {
             // CONTINUE HERE
-            std::string constructor = classInfo.name + "_proxy(";
+            std::string constructor = thisClass.name + "_proxy(";
 
-            if (classInfo.hasMultiplePublicFieldTypes)
+            if (thisClass.hasMultiplePublicFieldTypes)
             {
-                std::cerr << classInfo.name << ": createProxyClassStandardConstructor: not implemented yet" << std::endl;
+                std::cerr << thisClass.name << ": createProxyClassStandardConstructor: not implemented yet" << std::endl;
             }
             else
             {
-                constructor += (classInfo.publicFields[0].isConst ? "const " : "");
-                constructor += classInfo.publicFields[0].typeName + "* ptr, const std::size_t n)\n\t:";
+                constructor += (thisClass.publicFields[0].isConst ? "const " : "");
+                constructor += thisClass.publicFields[0].typeName + "* ptr, const std::size_t n)\n\t:";
             }
 
             return constructor;
         }
 
         // generate proxy class definition
-        void generateProxyClass(const CXXRecordDecl& decl, ASTContext& context)
+        void generateProxyClass(MetaData& thisClass)
         {
+            const clang::CXXRecordDecl& decl = thisClass.decl;
+            clang::ASTContext& context = thisClass.context;
+
             // replace class name
-            rewriter.ReplaceText(decl.getLocation(), classInfo.name + "_proxy");
+            rewriter.ReplaceText(decl.getLocation(), thisClass.name + "_proxy");
 
             // remove original constructors
             for (auto ctor : decl.ctors())
@@ -291,27 +304,27 @@ namespace TRAFO_NAMESPACE
             }
 
             // insert standard constructor
-            const std::string constructor = createProxyClassStandardConstructor(decl) + "\n";
-            if (classInfo.publicConstructors.size() > 0)
+            const std::string constructor = createProxyClassStandardConstructor(thisClass, decl) + "\n";
+            if (thisClass.publicConstructors.size() > 0)
             {
-                rewriter.ReplaceText(classInfo.publicConstructors[0].decl.getSourceRange(), constructor);
+                rewriter.ReplaceText(thisClass.publicConstructors[0].decl.getSourceRange(), constructor);
             }
             else
             {
-                const SourceLocation location = (classInfo.publicAccess.size() > 0 ? classInfo.publicAccess[0].scopeBegin : decl.getBraceRange().getEnd());
-                const std::string prefix = (classInfo.publicAccess.size() > 0 ? "\n\t" : "public:\n\t");
+                const clang::SourceLocation location = (thisClass.publicAccess.size() > 0 ? thisClass.publicAccess[0].scopeBegin : decl.getBraceRange().getEnd());
+                const std::string prefix = (thisClass.publicAccess.size() > 0 ? "\n\t" : "public:\n\t");
                 rewriter.InsertText(location, prefix + constructor, true, true);
             }
 
             // public variables: add reference qualifier
-            addReferenceQualifierToPublicFields(rewriter, context);
+            addReferenceQualifierToPublicFields(thisClass, rewriter);
         }
 
-        virtual void addReferenceQualifierToPublicFields(Rewriter& rewriter, ASTContext& context) = 0;
+        virtual void addReferenceQualifierToPublicFields(MetaData& , clang::Rewriter& rewriter) = 0;
 
     public:
         
-        ClassDefinition(Rewriter& rewriter)
+        ClassDefinition(clang::Rewriter& rewriter)
             :
             rewriter(rewriter)
         { ; }
@@ -322,15 +335,17 @@ namespace TRAFO_NAMESPACE
         using baseClass = ClassDefinition;
 
         using baseClass::rewriter;
-        using baseClass::classInfo;
+        using baseClass::targetClasses;
         using baseClass::matchAndModify;
 
-        virtual void addReferenceQualifierToPublicFields(Rewriter& rewriter, ASTContext& context)
+        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, clang::Rewriter& rewriter)
         {
-            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(classInfo.name))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
+            using namespace clang::ast_matchers;
+            clang::ASTContext& context = thisClass.context;
+            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(thisClass.name))))).bind("fieldDecl"),
+                [] (const MatchFinder::MatchResult& result, clang::Rewriter& rewriter)
                 { 
-                    if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl"))
+                    if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
                         rewriter.ReplaceText(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
                     }
@@ -340,26 +355,28 @@ namespace TRAFO_NAMESPACE
 
     public:
         
-        CXXClassDefinition(Rewriter& rewriter)
+        CXXClassDefinition(clang::Rewriter& rewriter)
             :
             baseClass(rewriter)
         { ; }
 
-        virtual void run(const MatchFinder::MatchResult& result)
+        virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
         {
-            if (const CXXRecordDecl* decl = result.Nodes.getNodeAs<CXXRecordDecl>("classDecl"))
+            if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
             {
-                classInfo.isTemplateClass = false;
-                classInfo.isTemplateClassDefinition = false;
-                collectMetaInformation(*decl, *result.Context);
+                targetClasses.emplace_back(*decl, *result.Context, false);
+                MetaData& thisClass = targetClasses.back();
+                //collectMetaInformation(thisClass);
 
-                if (classInfo.isProxyClassCandidate)
+                if (thisClass.isProxyClassCandidate)
                 {      
-                    std::cout << "class " << classInfo.name << " has constructors: " << classInfo.publicConstructors.size() << ", " <<classInfo.privateConstructors.size() << std::endl;
-
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
-                    baseClass::generateProxyClass(*decl, *result.Context);
+                    baseClass::generateProxyClass(thisClass);
                     rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
+                }
+                else
+                {
+                    targetClasses.pop_back();
                 }
             }
         }
@@ -370,15 +387,17 @@ namespace TRAFO_NAMESPACE
         using baseClass = ClassDefinition;
 
         using baseClass::rewriter;
-        using baseClass::classInfo;
+        using baseClass::targetClasses;
         using baseClass::matchAndModify;
 
-        virtual void addReferenceQualifierToPublicFields(Rewriter& rewriter, ASTContext& context)
+        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, clang::Rewriter& rewriter)
         {
-            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
+            using namespace clang::ast_matchers;
+            clang::ASTContext& context = thisClass.context;
+            matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(thisClass.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
+                [] (const MatchFinder::MatchResult& result, clang::Rewriter& rewriter)
                 { 
-                    if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl"))
+                    if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
                         rewriter.ReplaceText(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
                     }
@@ -388,58 +407,64 @@ namespace TRAFO_NAMESPACE
 
     public:
         
-        ClassTemplateDefinition(Rewriter& rewriter)
+        ClassTemplateDefinition(clang::Rewriter& rewriter)
             :
             baseClass(rewriter)
         { ; }
         
-        virtual void run(const MatchFinder::MatchResult& result)
+        virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
         {
-            if (const ClassTemplateDecl* decl = result.Nodes.getNodeAs<ClassTemplateDecl>("classTemplateDecl"))
+            if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDecl"))
             {
-                classInfo.isTemplateClass = true;
-                classInfo.isTemplateClassDefinition = decl->isThisDeclarationADefinition();
-                if (!classInfo.isTemplateClassDefinition) return;
-                collectMetaInformation(*(decl->getTemplatedDecl()), *result.Context);
+                const bool isTemplateClassDefinition = decl->isThisDeclarationADefinition();
+                if (!isTemplateClassDefinition) return;
 
-                if (classInfo.isProxyClassCandidate)
+                targetClasses.emplace_back(*(decl->getTemplatedDecl()), *result.Context, true);
+                MetaData& thisClass = targetClasses.back();
+                //collectMetaInformation(thisClass);
+
+                if (thisClass.isProxyClassCandidate)
                 {
-                    std::cout << "Tclass " << classInfo.name << " has constructors: " << classInfo.publicConstructors.size() << ", " <<classInfo.privateConstructors.size() << std::endl;
-
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
-                    baseClass::generateProxyClass(*(decl->getTemplatedDecl()), *result.Context);
+                    baseClass::generateProxyClass(thisClass);
                     rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
+                }
+                else
+                {
+                    targetClasses.pop_back();
                 }
             }
         }
     };
 
-    class FindProxyClassCandidate : public ASTConsumer
+    class FindProxyClassCandidate : public clang::ASTConsumer
     {
         CXXClassDefinition cxxClassHandler;
         ClassTemplateDefinition classTemplateHandler;
-        MatchFinder matcher;
+        clang::ast_matchers::MatchFinder matcher;
         
     public:
         
-        FindProxyClassCandidate(Rewriter& rewriter) 
+        FindProxyClassCandidate(clang::Rewriter& rewriter) 
             :
             cxxClassHandler(rewriter),
             classTemplateHandler(rewriter)
         {
+            using namespace clang::ast_matchers;
+
             matcher.addMatcher(cxxRecordDecl(allOf(isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl"), &cxxClassHandler);
             matcher.addMatcher(classTemplateDecl().bind("classTemplateDecl"), &classTemplateHandler);
         }
 
-        void HandleTranslationUnit(ASTContext& context) override
+        void HandleTranslationUnit(clang::ASTContext& context) override
         {	
             matcher.matchAST(context);
         }
     };
 
-    class InsertProxyClass : public ASTFrontendAction
+    class InsertProxyClass : public clang::ASTFrontendAction
     {
-        Rewriter rewriter;
+        clang::Rewriter rewriter;
         
     public:
         
@@ -450,7 +475,7 @@ namespace TRAFO_NAMESPACE
             rewriter.getEditBuffer(rewriter.getSourceMgr().getMainFileID()).write(llvm::outs());
         }
         
-        std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& ci, StringRef file) override
+        std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& ci, llvm::StringRef file) override
         {
             rewriter.setSourceMgr(ci.getSourceManager(), ci.getLangOpts());
             return llvm::make_unique<FindProxyClassCandidate>(rewriter);
