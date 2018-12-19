@@ -134,6 +134,15 @@ namespace TRAFO_NAMESPACE
                 { ; }
             };
 
+            struct Constructor
+            {
+                const CXXConstructorDecl& decl;
+                Constructor(const CXXConstructorDecl& decl)
+                    :
+                    decl(decl)
+                { ; }
+            };
+
         public:
 
             std::string className;
@@ -144,6 +153,8 @@ namespace TRAFO_NAMESPACE
             std::vector<MemberField> privateFields;
             bool hasNonFundamentalPublicFields;
             bool hasMultiplePublicFieldTypes;
+            std::vector<Constructor> publicConstructors;
+            std::vector<Constructor> privateConstructors;
             bool isProxyClassCandidate;
         } classInfo;
 
@@ -169,7 +180,7 @@ namespace TRAFO_NAMESPACE
                 // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
             #define MATCH(MODIFIER, VARIABLE) \
                 match(context, classInfo.isTemplateClass ? fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.className), unless(isTemplateInstantiation())))))).bind("fieldDecl") \
-                                                        : fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("fieldDecl"), \
+                                                         : fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("fieldDecl"), \
                     [&] (const MatchFinder::MatchResult& result) mutable \
                     { \
                         if (const FieldDecl* decl = result.Nodes.getNodeAs<FieldDecl>("fieldDecl")) \
@@ -201,12 +212,43 @@ namespace TRAFO_NAMESPACE
             }
             // proxy class candidates must have fundamental public fields
             classInfo.isProxyClassCandidate &= !classInfo.hasNonFundamentalPublicFields;// || classInfo.hasMultiplePublicFieldTypes);
+
+            // everything below is executed only of this class is a proxy class candidate
+            if (classInfo.isProxyClassCandidate)
+            {
+                // match all (public, private) constructors
+            #define MATCH(MODIFIER, VARIABLE) \
+                match(context, classInfo.isTemplateClass ? cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(classInfo.className), unless(isTemplateInstantiation())))))).bind("constructorDecl") \
+                                                         : cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(hasName(classInfo.className))))).bind("constructorDecl"), \
+                    [&] (const MatchFinder::MatchResult& result) mutable \
+                    { \
+                        if (const CXXConstructorDecl* decl = result.Nodes.getNodeAs<CXXConstructorDecl>("constructorDecl")) \
+                        { \
+                            VARIABLE.emplace_back(*decl); \
+                        } \
+                    } \
+                )
+
+                MATCH(isPublic, classInfo.publicConstructors);
+                MATCH(isPrivate, classInfo.privateConstructors);
+            #undef MATCH
+            }
         }
 
         std::string createProxyClassStandardConstructor(const CXXRecordDecl& decl) const
         {
             // CONTINUE HERE
             std::string constructor = classInfo.className + "_proxy(";
+
+            if (classInfo.hasMultiplePublicFieldTypes)
+            {
+
+            }
+            else
+            {
+                constructor += (classInfo.publicFields[0].isConst ? "const " : "");
+                constructor += classInfo.publicFields[0].typeName + "* ptr, const std::size_t n)\n\t:";
+            }
 
             return constructor;
         }
@@ -224,7 +266,16 @@ namespace TRAFO_NAMESPACE
             }
 
             // insert standard constructor
-            createProxyClassStandardConstructor(decl);
+            const std::string constructor = createProxyClassStandardConstructor(decl) + "\n";
+            if (classInfo.publicConstructors.size() > 0)
+            {
+                rewriter.ReplaceText(classInfo.publicConstructors[0].decl.getSourceRange(), constructor);
+            }
+            else
+            {
+                const SourceLocation endOfClassDefinition = decl.getBraceRange().getEnd();//.getLocWithOffset(1)
+                rewriter.InsertText(endOfClassDefinition, "public:\n\t" + constructor, true, true);
+            }
 
             // public variables: add reference qualifier
             addReferenceQualifierToPublicFields(rewriter, context);
