@@ -56,16 +56,28 @@ namespace TRAFO_NAMESPACE
             return rewriter.getLangOpts();
         }
 
-        bool InsertText(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
+        bool insert(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
         {
             return rewriter.InsertText(sourceLocation, text, insertAfter, indentNewLines);
         }
 
-        bool ReplaceText(const clang::SourceRange& sourceRange, const std::string& text)
+        bool replace(const clang::SourceRange& sourceRange, const std::string& text)
         {
             return rewriter.ReplaceText(sourceRange, text);
         }
         
+        bool InsertText(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
+        {
+            // compatibility with clang::Rewriter interface 
+            return insert(sourceLocation, text, insertAfter, indentNewLines);
+        }
+
+        bool ReplaceText(const clang::SourceRange& sourceRange, const std::string& text)
+        {
+            // compatibility with clang::Rewriter interface
+            return replace(sourceRange, text);
+        }
+
         template <typename T>
         void add(const T& match, const Kernel& kernel)
         {

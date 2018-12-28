@@ -235,25 +235,25 @@ namespace TRAFO_NAMESPACE
             clang::ASTContext& context = thisClass.context;
 
             // replace class name
-            rewriter.ReplaceText(decl.getLocation(), thisClass.name + "_proxy");
+            rewriter.replace(decl.getLocation(), thisClass.name + "_proxy");
 
             // remove original constructors
             for (auto ctor : decl.ctors())
             {
-                rewriter.ReplaceText(ctor->getSourceRange(), "// constructor: removed");    
+                rewriter.replace(ctor->getSourceRange(), "// constructor: removed");    
             }
 
             // insert standard constructor
             const std::string constructor = createProxyClassStandardConstructor(thisClass, decl) + "\n";
             if (thisClass.publicConstructors.size() > 0)
             {
-                rewriter.ReplaceText(thisClass.publicConstructors[0].decl.getSourceRange(), constructor);
+                rewriter.replace(thisClass.publicConstructors[0].decl.getSourceRange(), constructor);
             }
             else
             {
                 const clang::SourceLocation location = (thisClass.publicAccess.size() > 0 ? thisClass.publicAccess[0].scopeBegin : decl.getBraceRange().getEnd());
                 const std::string prefix = (thisClass.publicAccess.size() > 0 ? "\n\t" : "public:\n\t");
-                rewriter.InsertText(location, prefix + constructor, true, true);
+                rewriter.insert(location, prefix + constructor, true, true);
             }
 
             // public variables: add reference qualifier
@@ -286,7 +286,7 @@ namespace TRAFO_NAMESPACE
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
-                        rewriter.ReplaceText(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
+                        rewriter.replace(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
                     }
                 });
             rewriter.run(thisClass.context);
@@ -312,7 +312,7 @@ namespace TRAFO_NAMESPACE
                 {      
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
                     Base::generateProxyClass(thisClass);
-                    rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
+                    rewriter.insert(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
                 }
                 else
                 {
@@ -338,7 +338,7 @@ namespace TRAFO_NAMESPACE
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
-                        rewriter.ReplaceText(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
+                        rewriter.replace(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
                     }
                 });
             rewriter.run(thisClass.context);
@@ -367,7 +367,7 @@ namespace TRAFO_NAMESPACE
                 {
                     const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
                     Base::generateProxyClass(thisClass);
-                    rewriter.InsertText(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
+                    rewriter.insert(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
                 }
                 else
                 {
