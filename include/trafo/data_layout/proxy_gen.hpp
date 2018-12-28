@@ -95,7 +95,7 @@ namespace TRAFO_NAMESPACE
                     // match all (public, private) fields of the class and collect information: 
                     // declaration, const qualifier, fundamental type, type name, name
                 #define MATCH(MODIFIER, VARIABLE) \
-                    matcher.add(fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
+                    matcher.addMatcher(fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         { \
                             if (!isProxyClassCandidate) return; \
@@ -137,7 +137,7 @@ namespace TRAFO_NAMESPACE
                     using namespace clang::ast_matchers;
 
                     // match public and private access specifier
-                    matcher.add(accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
+                    matcher.addMatcher(accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         {
                             if (const clang::AccessSpecDecl* decl = result.Nodes.getNodeAs<clang::AccessSpecDecl>("accessSpecDecl"))
@@ -148,7 +148,7 @@ namespace TRAFO_NAMESPACE
                     
                     // match all (public, private) constructors
                 #define MATCH(MODIFIER, VARIABLE) \
-                    matcher.add(cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
+                    matcher.addMatcher(cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         { \
                             if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
@@ -281,7 +281,7 @@ namespace TRAFO_NAMESPACE
         {
             using namespace clang::ast_matchers;
             
-            rewriter.add(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(thisClass.name))))).bind("fieldDecl"),
+            rewriter.addMatcher(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(thisClass.name))))).bind("fieldDecl"),
                 [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
@@ -333,7 +333,7 @@ namespace TRAFO_NAMESPACE
         {
             using namespace clang::ast_matchers;
             
-            rewriter.add(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(thisClass.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
+            rewriter.addMatcher(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(thisClass.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
                 [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))

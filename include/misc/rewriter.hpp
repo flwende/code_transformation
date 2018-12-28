@@ -79,7 +79,7 @@ namespace TRAFO_NAMESPACE
         }
 
         template <typename T>
-        void add(const T& match, const Kernel& kernel)
+        void addMatcher(const T& match, const Kernel& kernel)
         {
             if (matcher.get() == nullptr)
             {
