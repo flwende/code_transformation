@@ -3,8 +3,8 @@
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
 
-#if !defined(REWRITER_HPP)
-#define REWRITER_HPP
+#if !defined(MATCHER_HPP)
+#define MATCHER_HPP
 
 #include <vector>
 #include <memory>
@@ -16,55 +16,36 @@
 
 namespace TRAFO_NAMESPACE
 {
-    class Rewriter
+    class Matcher
     {
-        using Kernel = std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, clang::Rewriter&)>;
+        using Kernel = std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&)>;
 
         class Action : public clang::ast_matchers::MatchFinder::MatchCallback
         {
             const Kernel kernel;
-            clang::Rewriter& rewriter;
 
         public:
 
-            Action(const Kernel& kernel, clang::Rewriter& rewriter)
+            Action(const Kernel& kernel)
                 :
-                kernel(kernel),
-                rewriter(rewriter)
+                kernel(kernel)
             { ; }
 
             void virtual run(const clang::ast_matchers::MatchFinder::MatchResult& result)
             {
-                kernel(result, rewriter);
+                kernel(result);
             }
         };
 
         std::unique_ptr<clang::ast_matchers::MatchFinder> matcher;   
         std::vector<std::unique_ptr<Action>> actions;
-        clang::Rewriter& rewriter;
         
     public:
 
-        Rewriter(clang::Rewriter& rewriter)
+        Matcher()
             :
-            matcher(nullptr),
-            rewriter(rewriter)
+            matcher(nullptr)
         { ; }
-
-        const clang::LangOptions& getLangOpts() const
-        {
-            return rewriter.getLangOpts();
-        }
-
-        bool InsertText(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
-        {
-            return rewriter.InsertText(sourceLocation, text, insertAfter, indentNewLines);
-        }
-
-        bool ReplaceText(const clang::SourceRange& sourceRange, const std::string& text)
-        {
-            return rewriter.ReplaceText(sourceRange, text);
-        }
         
         template <typename T>
         void add(const T& match, const Kernel& kernel)
@@ -73,12 +54,12 @@ namespace TRAFO_NAMESPACE
             {
                 matcher = std::unique_ptr<clang::ast_matchers::MatchFinder>(new clang::ast_matchers::MatchFinder());
             }
-
-            actions.emplace_back(new Action(kernel, rewriter));
+             
+            actions.emplace_back(new Action(kernel));
             matcher->addMatcher(match, actions.back().get());
         }
 
-        void run(clang::ASTContext& context) const
+        void run(clang::ASTContext& context)
         {
             if (matcher.get() != nullptr)
             {

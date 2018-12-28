@@ -24,6 +24,7 @@
 
 #include <misc/string_helper.hpp>
 #include <misc/rewriter.hpp>
+#include <misc/matcher.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -37,18 +38,18 @@ namespace TRAFO_NAMESPACE
     {
     protected:
 
-        clang::Rewriter& rewriter;
+        Rewriter& rewriter;
 
         // generic handler definitions
         class MyRewriter : public clang::ast_matchers::MatchFinder::MatchCallback
         {
-            clang::Rewriter& rewriter;
-            std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, clang::Rewriter&)> kernel;
+            Rewriter& rewriter;
+            std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, Rewriter&)> kernel;
 
         public:
 
             template <typename F>
-            MyRewriter(clang::Rewriter& rewriter, const F& kernel)
+            MyRewriter(Rewriter& rewriter, const F& kernel)
                 :
                 rewriter(rewriter),
                 kernel(kernel)  
@@ -158,6 +159,8 @@ namespace TRAFO_NAMESPACE
 
             void collectMetaData()
             {
+                Matcher matcher;
+
                 // isTemplateClass has been set already
                 // isTemplateClassDefinition has been set already
 
@@ -170,6 +173,7 @@ namespace TRAFO_NAMESPACE
                 if (!isProxyClassCandidate) return;
                     
                 numFields = std::distance(decl.field_begin(), decl.field_end());
+                /*
                 if (numFields > 0)
                 {
                     // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
@@ -195,6 +199,36 @@ namespace TRAFO_NAMESPACE
                     MATCH(isPrivate, privateFields);
                 #undef MATCH
                 }
+                */
+                
+                if (numFields > 0)
+                {
+                    // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
+                    using namespace clang::ast_matchers;
+                #define MATCH(MODIFIER, VARIABLE) \
+                    matcher.add(fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        { \
+                            if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
+                            { \
+                                const clang::QualType qualType = decl->getType(); \
+                                const bool isConstant = qualType.getQualifiers().hasConst(); \
+                                const clang::Type* type = qualType.getTypePtrOrNull(); \
+                                const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
+                                VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
+                            } \
+                        })
+                    
+                    MATCH(isPublic, publicFields);
+                    MATCH(isPrivate, privateFields);
+                    matcher.run(context);
+                    matcher.clear();
+                #undef MATCH
+                }
+                
+                isProxyClassCandidate &= (publicFields.size() > 0);
+                // proxy class candidates must have at least 1 public field
+                if (!isProxyClassCandidate) return;
 
                 hasNonFundamentalPublicFields = false;
                 hasMultiplePublicFieldTypes = false;
@@ -320,11 +354,11 @@ namespace TRAFO_NAMESPACE
             addReferenceQualifierToPublicFields(thisClass, rewriter);
         }
 
-        virtual void addReferenceQualifierToPublicFields(MetaData& , clang::Rewriter& rewriter) = 0;
+        virtual void addReferenceQualifierToPublicFields(MetaData& , Rewriter& rewriter) = 0;
 
     public:
         
-        ClassDefinition(clang::Rewriter& rewriter)
+        ClassDefinition(Rewriter& rewriter)
             :
             rewriter(rewriter)
         { ; }
@@ -338,12 +372,12 @@ namespace TRAFO_NAMESPACE
         using baseClass::targetClasses;
         using baseClass::matchAndModify;
 
-        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, clang::Rewriter& rewriter)
+        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, Rewriter& rewriter)
         {
             using namespace clang::ast_matchers;
             clang::ASTContext& context = thisClass.context;
             matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(thisClass.name))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, clang::Rewriter& rewriter)
+                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
@@ -355,7 +389,7 @@ namespace TRAFO_NAMESPACE
 
     public:
         
-        CXXClassDefinition(clang::Rewriter& rewriter)
+        CXXClassDefinition(Rewriter& rewriter)
             :
             baseClass(rewriter)
         { ; }
@@ -390,12 +424,12 @@ namespace TRAFO_NAMESPACE
         using baseClass::targetClasses;
         using baseClass::matchAndModify;
 
-        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, clang::Rewriter& rewriter)
+        virtual void addReferenceQualifierToPublicFields(MetaData& thisClass, Rewriter& rewriter)
         {
             using namespace clang::ast_matchers;
             clang::ASTContext& context = thisClass.context;
             matchAndModify(context, fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(thisClass.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, clang::Rewriter& rewriter)
+                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
                 { 
                     if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
                     {        
@@ -407,7 +441,7 @@ namespace TRAFO_NAMESPACE
 
     public:
         
-        ClassTemplateDefinition(clang::Rewriter& rewriter)
+        ClassTemplateDefinition(Rewriter& rewriter)
             :
             baseClass(rewriter)
         { ; }
@@ -439,14 +473,16 @@ namespace TRAFO_NAMESPACE
 
     class FindProxyClassCandidate : public clang::ASTConsumer
     {
+        Rewriter rewriter;
         CXXClassDefinition cxxClassHandler;
         ClassTemplateDefinition classTemplateHandler;
         clang::ast_matchers::MatchFinder matcher;
         
     public:
         
-        FindProxyClassCandidate(clang::Rewriter& rewriter) 
+        FindProxyClassCandidate(clang::Rewriter& clangRewriter) 
             :
+            rewriter(clangRewriter),
             cxxClassHandler(rewriter),
             classTemplateHandler(rewriter)
         {
