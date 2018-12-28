@@ -49,6 +49,7 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceLocation sourceLocation;
                 const clang::SourceRange sourceRange;
                 const clang::SourceLocation scopeBegin;
+
                 AccessSpecifier(const clang::AccessSpecDecl& decl)
                     :
                     decl(decl),
@@ -61,6 +62,7 @@ namespace TRAFO_NAMESPACE
             struct Constructor
             {
                 const clang::CXXConstructorDecl& decl;
+
                 Constructor(const clang::CXXConstructorDecl& decl)
                     :
                     decl(decl)
@@ -70,92 +72,100 @@ namespace TRAFO_NAMESPACE
             struct MemberField
             {
                 const clang::FieldDecl& decl;
+                const std::string name;
+                const std::string typeName;
+                const bool isPublic;
                 const bool isConst;
                 const bool isFundamentalOrTemplateType;
-                const std::string typeName;
-                const std::string name;
-                MemberField(const clang::FieldDecl& decl, const bool isConst, const bool isFundamentalOrTemplateType, const std::string typeName, const std::string name)
+                
+                MemberField(const clang::FieldDecl& decl, const std::string typeName, const std::string name, const bool isPublic, const bool isConst, const bool isFundamentalOrTemplateType)
                     :
                     decl(decl),
-                    isConst(isConst),
-                    isFundamentalOrTemplateType(isFundamentalOrTemplateType),
+                    name(name),
                     typeName(typeName),
-                    name(name)
+                    isPublic(isPublic),
+                    isConst(isConst),
+                    isFundamentalOrTemplateType(isFundamentalOrTemplateType)
                 { ; }
             };
             
             void collectMetaData()
             {
-                using namespace clang::ast_matchers;
-
                 Matcher matcher;
-                
+
                 // match all (public, private) fields of the class and collect information: 
                 // declaration, const qualifier, fundamental type, type name, name
-            #define MATCH(MODIFIER, VARIABLE) \
-                matcher.addMatcher(fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    { \
-                        if (!isProxyClassCandidate) return; \
-                        \
-                        if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
-                        { \
-                            const clang::QualType qualType = decl->getType(); \
-                            const bool isConstant = qualType.getQualifiers().hasConst(); \
-                            const clang::Type* type = qualType.getTypePtrOrNull(); \
-                            const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
-                            VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
-                        } \
-                    })
-                
-                MATCH(isPublic, publicFields);
-                MATCH(isPrivate, privateFields);
-            #undef MATCH
+                std::string publicFieldTypeName;
+                for (auto field : decl.fields())
+                {
+                    const clang::QualType qualType = field->getType();
+                    const clang::Type* type = qualType.getTypePtrOrNull();
 
-                matcher.run(context);
-                matcher.clear();
+                    const std::string name = field->getType().getAsString();
+                    const std::string typeName = field->getNameAsString();
+                    const bool isPublic = Matcher::testDecl(*field, clang::ast_matchers::fieldDecl(clang::ast_matchers::isPublic()), context);
+                    const bool isConstant = qualType.getQualifiers().hasConst();
+                    const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false);
+                    fields.emplace_back(*field, name, typeName, isPublic, isConstant, isFundamentalOrTemplateType);
+
+                    if (isPublic)
+                    {
+                        const MemberField& thisField = fields.back();
+
+                        if (numPublicFields == 0)
+                        {
+                            publicFieldTypeName = thisField.typeName;
+                        }
+                        else
+                        {
+                            hasMultiplePublicFieldTypes |= (thisField.typeName != publicFieldTypeName);
+                        }
+
+                        hasNonFundamentalPublicFields |= !(thisField.isFundamentalOrTemplateType);
+
+                        ++numPublicFields;
+                    }
+                }
                 
                 // proxy class candidates must have at least 1 public field
-                isProxyClassCandidate &= (publicFields.size() > 0);
+                isProxyClassCandidate &= (numPublicFields > 0);
                 if (!isProxyClassCandidate) return;
 
                 // proxy class candidates must have fundamental public fields
-                const std::string typeName = publicFields[0].typeName;
-                for (auto field : publicFields)
-                {
-                    hasNonFundamentalPublicFields |= !(field.isFundamentalOrTemplateType);
-                    hasMultiplePublicFieldTypes |= (field.typeName != typeName);
-                }
                 isProxyClassCandidate &= !hasNonFundamentalPublicFields;
-                if (!isProxyClassCandidate) return;
-                
-                // match public and private access specifier
-                matcher.addMatcher(accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    {
-                        if (const clang::AccessSpecDecl* decl = result.Nodes.getNodeAs<clang::AccessSpecDecl>("accessSpecDecl"))
-                        {
-                            publicAccess.emplace_back(*decl);
-                        }
-                    });
-                
-                // match all (public, private) constructors
-            #define MATCH(MODIFIER, VARIABLE) \
-                matcher.addMatcher(cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
-                    [&] (const MatchFinder::MatchResult& result) mutable \
-                    { \
-                        if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
-                        { \
-                            VARIABLE.emplace_back(*decl); \
-                        } \
-                    })
-                    
-                MATCH(isPublic, publicConstructors);
-                MATCH(isPrivate, privateConstructors);
-            #undef MATCH
 
-                matcher.run(context);
-                matcher.clear();
+                if (isProxyClassCandidate);
+                {
+                    using namespace clang::ast_matchers;
+
+                    // match public and private access specifier
+                    matcher.addMatcher(accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        {
+                            if (const clang::AccessSpecDecl* decl = result.Nodes.getNodeAs<clang::AccessSpecDecl>("accessSpecDecl"))
+                            {
+                                publicAccess.emplace_back(*decl);
+                            }
+                        });
+                    
+                    // match all (public, private) constructors
+                #define MATCH(MODIFIER, VARIABLE) \
+                    matcher.addMatcher(cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
+                        [&] (const MatchFinder::MatchResult& result) mutable \
+                        { \
+                            if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
+                            { \
+                                VARIABLE.emplace_back(*decl); \
+                            } \
+                        })
+                        
+                    MATCH(isPublic, publicConstructors);
+                    MATCH(isPrivate, privateConstructors);
+                #undef MATCH
+
+                    matcher.run(context);
+                    matcher.clear();
+                }
             }
 
         public:
@@ -166,6 +176,7 @@ namespace TRAFO_NAMESPACE
             const bool isStruct;
             const bool isTemplated;
             const std::size_t numFields;
+            std::size_t numPublicFields;
             bool hasNonFundamentalPublicFields;
             bool hasMultiplePublicFieldTypes;
             bool isProxyClassCandidate;
@@ -173,8 +184,7 @@ namespace TRAFO_NAMESPACE
             std::vector<AccessSpecifier> privateAccess;
             std::vector<Constructor> publicConstructors;
             std::vector<Constructor> privateConstructors;
-            std::vector<MemberField> publicFields;
-            std::vector<MemberField> privateFields;
+            std::vector<MemberField> fields;
 
             // proxy class candidates should not have any of these properties: abstract, polymorphic, empty AND
             // proxy class candidates must be class definitions and no specializations in case of template classes
@@ -188,6 +198,7 @@ namespace TRAFO_NAMESPACE
                 isStruct(Matcher::testDecl(decl, clang::ast_matchers::recordDecl(clang::ast_matchers::isStruct()), context)),
                 isTemplated(isTemplated),
                 numFields(std::distance(decl.field_begin(), decl.field_end())),
+                numPublicFields(0),
                 hasNonFundamentalPublicFields(false),
                 hasMultiplePublicFieldTypes(false),
                 isProxyClassCandidate(numFields > 0 && (isTemplated ? true : decl.getDescribedClassTemplate() == nullptr) &&
@@ -222,7 +233,7 @@ namespace TRAFO_NAMESPACE
 
         std::string createProxyClassStandardConstructor(MetaData& thisClass, const clang::CXXRecordDecl& decl) const
         {
-            std::string constructor = thisClass.name + "_proxy(";
+            std::string constructor = thisClass.name + std::string("_proxy(");
 
             if (thisClass.hasMultiplePublicFieldTypes)
             {
@@ -230,8 +241,46 @@ namespace TRAFO_NAMESPACE
             }
             else
             {
-                constructor += (thisClass.publicFields[0].isConst ? "const " : "");
-                constructor += thisClass.publicFields[0].typeName + "* ptr, const std::size_t n)\n\t:\n\t";
+                std::string publicFieldType;
+                for (auto field : thisClass.fields)
+                {
+                    if (field.isPublic)
+                    {
+                        publicFieldType = field.typeName;
+                        break;
+                    }
+                }
+
+                constructor += publicFieldType + std::string("* ptr, const std::size_t n");
+                if (thisClass.numFields > thisClass.numPublicFields)
+                {
+                    for (auto field : thisClass.fields)
+                    {
+                        if (!field.isPublic)
+                        {
+                            constructor +=  std::string(", ") + field.typeName + std::string(" ") + field.name;
+                        }
+                    }
+                }
+                constructor += ")\n\t:\n\t";
+
+                std::size_t publicFieldId = 0;
+                std::size_t fieldId = 0;
+                for (auto field : thisClass.fields)
+                {
+                    if (field.isPublic)
+                    {
+                        constructor += field.name + std::string("(ptr[") + std::to_string(publicFieldId) + std::string(" * n])");
+                        ++publicFieldId;
+                    }
+                    else
+                    {
+                        constructor += field.name + std::string("(") + field.name + std::string(")");
+                    }
+
+                    constructor += std::string((fieldId + 1) == thisClass.numFields ? "\n\t{ ; }" : ",\n\t");
+                    ++fieldId;
+                }
             }
 
             return constructor;
