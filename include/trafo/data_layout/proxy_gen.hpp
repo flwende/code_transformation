@@ -156,59 +156,22 @@ namespace TRAFO_NAMESPACE
                     name(name)
                 { ; }
             };
-
+            
             void collectMetaData()
             {
                 Matcher matcher;
 
-                // isTemplateClass has been set already
-                // isTemplateClassDefinition has been set already
-
-                // proxy class candidates should not have any of these properties: abstract, polymorphic, empty
-                isProxyClassCandidate = !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty());
-                // proxy class candidates must be class definitions and no specializations in case of template classes
-                // note: a template class specialization is of type CXXRecordDecl, and we need to check for its describing template class
-                //       (if it does not exist, then it is a normal C++ class)
-                if (!isTemplateClass) isProxyClassCandidate &= (decl.getDescribedClassTemplate() == nullptr);
-                if (!isProxyClassCandidate) return;
-                    
-                numFields = std::distance(decl.field_begin(), decl.field_end());
-                /*
                 if (numFields > 0)
                 {
-                    // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
-                    using namespace clang::ast_matchers;
-                #define MATCH(MODIFIER, VARIABLE) \
-                    ClassDefinition::match(context, fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
-                        [&] (const MatchFinder::MatchResult& result) mutable \
-                        { \
-                            if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
-                            { \
-                                const clang::QualType qualType = decl->getType(); \
-                                const bool isConstant = qualType.getQualifiers().hasConst(); \
-                                const clang::Type* type = qualType.getTypePtrOrNull(); \
-                                const bool isFundamentalOrTemplateType = (type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false); \
-                                VARIABLE.emplace_back(*decl, isConstant, isFundamentalOrTemplateType, decl->getType().getAsString(), decl->getNameAsString()); \
-                            } \
-                        })
-                    
-                    MATCH(isPublic, publicFields);
-                    isProxyClassCandidate &= (publicFields.size() > 0);
-                    // proxy class candidates must have at least 1 public field
-                    if (!isProxyClassCandidate) return;
-                    MATCH(isPrivate, privateFields);
-                #undef MATCH
-                }
-                */
-                
-                if (numFields > 0)
-                {
-                    // match all (public, private) fields of the class and collect information: declaration, const qualifier, fundamental type, type name, name
+                    // match all (public, private) fields of the class and collect information: 
+                    // declaration, const qualifier, fundamental type, type name, name
                     using namespace clang::ast_matchers;
                 #define MATCH(MODIFIER, VARIABLE) \
                     matcher.add(fieldDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("fieldDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         { \
+                            if (!isProxyClassCandidate) return; \
+                            \
                             if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
                             { \
                                 const clang::QualType qualType = decl->getType(); \
@@ -221,17 +184,16 @@ namespace TRAFO_NAMESPACE
                     
                     MATCH(isPublic, publicFields);
                     MATCH(isPrivate, privateFields);
+                #undef MATCH
+                
                     matcher.run(context);
                     matcher.clear();
-                #undef MATCH
                 }
                 
                 isProxyClassCandidate &= (publicFields.size() > 0);
                 // proxy class candidates must have at least 1 public field
                 if (!isProxyClassCandidate) return;
 
-                hasNonFundamentalPublicFields = false;
-                hasMultiplePublicFieldTypes = false;
                 const std::string typeName = publicFields[0].typeName;
                 for (auto field : publicFields)
                 {
@@ -246,7 +208,7 @@ namespace TRAFO_NAMESPACE
                 {
                     using namespace clang::ast_matchers;
                     // match public and private access specifier
-                    ClassDefinition::match(context, accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
+                    matcher.add(accessSpecDecl(hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))))).bind("accessSpecDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         {
                             if (const clang::AccessSpecDecl* decl = result.Nodes.getNodeAs<clang::AccessSpecDecl>("accessSpecDecl"))
@@ -257,7 +219,7 @@ namespace TRAFO_NAMESPACE
                     
                     // match all (public, private) constructors
                 #define MATCH(MODIFIER, VARIABLE) \
-                    ClassDefinition::match(context, cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
+                    matcher.add(cxxConstructorDecl(allOf(MODIFIER(), hasParent(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation())))))).bind("constructorDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         { \
                             if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
@@ -269,6 +231,9 @@ namespace TRAFO_NAMESPACE
                     MATCH(isPublic, publicConstructors);
                     MATCH(isPrivate, privateConstructors);
                 #undef MATCH
+
+                    matcher.run(context);
+                    matcher.clear();
                 }
             }
 
@@ -277,26 +242,38 @@ namespace TRAFO_NAMESPACE
             const clang::CXXRecordDecl& decl;
             clang::ASTContext& context;
             const std::string name;
+            std::size_t numFields;
             bool isTemplateClass;
+            bool hasNonFundamentalPublicFields;
+            bool hasMultiplePublicFieldTypes;
+            bool isProxyClassCandidate;
             std::vector<AccessSpecifier> publicAccess;
             std::vector<AccessSpecifier> privateAccess;
             std::vector<Constructor> publicConstructors;
             std::vector<Constructor> privateConstructors;
             std::vector<MemberField> publicFields;
             std::vector<MemberField> privateFields;
-            std::size_t numFields;
-            bool hasNonFundamentalPublicFields;
-            bool hasMultiplePublicFieldTypes;
-            bool isProxyClassCandidate;
 
             MetaData(const clang::CXXRecordDecl& decl, clang::ASTContext& context, const bool isTemplateClass)
                 :
                 decl(decl),
                 context(context),
                 name(decl.getNameAsString()),                
-                isTemplateClass(isTemplateClass)
+                numFields(std::distance(decl.field_begin(), decl.field_end())),
+                isTemplateClass(isTemplateClass),
+                hasNonFundamentalPublicFields(false),
+                hasMultiplePublicFieldTypes(false),
+                // proxy class candidates should not have any of these properties: abstract, polymorphic, empty AND
+                // proxy class candidates must be class definitions and no specializations in case of template classes
+                // note: a template class specialization is of type CXXRecordDecl, and we need to check for its describing template class
+                //       (if it does not exist, then it is a normal C++ class)
+                isProxyClassCandidate((isTemplateClass ? true : decl.getDescribedClassTemplate() == nullptr) &&
+                                      !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty()))
             {
-                collectMetaData();
+                if (isProxyClassCandidate)
+                {
+                    collectMetaData();
+                }
             }
         };
 
