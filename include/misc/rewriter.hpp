@@ -18,16 +18,16 @@ namespace TRAFO_NAMESPACE
 {
     class Rewriter
     {
-        using Kernel = std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, clang::Rewriter&)>;
+        using Kernel = std::function<void(const clang::ast_matchers::MatchFinder::MatchResult&, Rewriter&)>;
 
         class Action : public clang::ast_matchers::MatchFinder::MatchCallback
         {
             const Kernel kernel;
-            clang::Rewriter& rewriter;
+            Rewriter& rewriter;
 
         public:
 
-            Action(const Kernel& kernel, clang::Rewriter& rewriter)
+            Action(const Kernel& kernel, Rewriter& rewriter)
                 :
                 kernel(kernel),
                 rewriter(rewriter)
@@ -74,7 +74,7 @@ namespace TRAFO_NAMESPACE
                 matcher = std::unique_ptr<clang::ast_matchers::MatchFinder>(new clang::ast_matchers::MatchFinder());
             }
 
-            actions.emplace_back(new Action(kernel, rewriter));
+            actions.emplace_back(new Action(kernel, *this));
             matcher->addMatcher(match, actions.back().get());
         }
 
