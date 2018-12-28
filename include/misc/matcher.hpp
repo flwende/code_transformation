@@ -76,6 +76,35 @@ namespace TRAFO_NAMESPACE
             
             actions.clear();
         }
+
+        template <typename N, typename T>
+        static bool testDecl(const N& node, const T& match, clang::ASTContext& context)
+        {
+            return test<clang::Decl>(node, match, context);
+        }
+
+    private:
+
+        template <typename D, typename N, typename T>
+        static bool test(const N& node, const T& match, clang::ASTContext& context)
+        {
+            using namespace clang::ast_matchers;
+
+            bool testResult = false;
+            Action tester([&] (const MatchFinder::MatchResult& result)
+                {
+                    if (const D* decl = result.Nodes.getNodeAs<D>("any"))
+                    {        
+                        testResult = true;
+                    }
+                });
+
+            MatchFinder matcher;
+            matcher.addMatcher(match.bind("any"), &tester);
+            matcher.match(node, context);
+
+            return testResult;
+        }
     };
 }
 
