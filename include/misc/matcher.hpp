@@ -3,9 +3,10 @@
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
 
-#if !defined(MATCHER_HPP)
-#define MATCHER_HPP
+#if !defined(MISC_MATCHER_HPP)
+#define MISC_MATCHER_HPP
 
+#include <string>
 #include <vector>
 #include <memory>
 #include <clang/ASTMatchers/ASTMatchFinder.h>

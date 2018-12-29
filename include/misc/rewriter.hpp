@@ -3,11 +3,13 @@
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
 
-#if !defined(REWRITER_HPP)
-#define REWRITER_HPP
+#if !defined(MISC_REWRITER_HPP)
+#define MISC_REWRITER_HPP
 
+#include <string>
 #include <vector>
 #include <memory>
+#include <clang/Rewrite/Core/Rewriter.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 
 #if !defined(TRAFO_NAMESPACE)

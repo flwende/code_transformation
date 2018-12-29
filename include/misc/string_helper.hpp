@@ -3,9 +3,10 @@
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
 
-#if !defined(STRING_HELPER_HPP)
-#define STRING_HELPER_HPP
+#if !defined(MISC_STRING_HELPER_HPP)
+#define MISC_STRING_HELPER_HPP
 
+#include <string>
 #include <clang/AST/AST.h>
 
 #if !defined(TRAFO_NAMESPACE)
