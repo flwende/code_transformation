@@ -25,7 +25,8 @@
 #include <misc/string_helper.hpp>
 #include <misc/rewriter.hpp>
 #include <misc/matcher.hpp>
-#include <trafo/class/meta_data.hpp>
+#include <trafo/data_layout/class_meta_data.hpp>
+#include <trafo/data_layout/variable_declaration.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -247,6 +248,8 @@ namespace TRAFO_NAMESPACE
         CXXClassDefinition cxxClassHandler;
         ClassTemplateDefinition classTemplateHandler;
         
+        std::vector<ContainerDeclaration> vectorDeclarations;
+        
     public:
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter) 
@@ -259,11 +262,41 @@ namespace TRAFO_NAMESPACE
         void HandleTranslationUnit(clang::ASTContext& context) override
         {	
             using namespace clang::ast_matchers;
-
+            /*
             MatchFinder matcher;
             matcher.addMatcher(cxxRecordDecl(allOf(isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl"), &cxxClassHandler);
             matcher.addMatcher(classTemplateDecl().bind("classTemplateDecl"), &classTemplateHandler);
             matcher.matchAST(context);
+            */
+
+            // 1. step: find all relevant container declarations
+            std::vector<std::string> containerNames;
+            containerNames.push_back("vector");
+
+            Matcher matcher;
+            for (auto containerName : containerNames)
+            {
+                matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::VarDecl* decl = result.Nodes.getNodeAs<clang::VarDecl>("varDecl"))
+                        {
+                            ContainerDeclaration vecDecl = ContainerDeclaration::make(*decl, context, containerName);
+                            if (!vecDecl.dataType.isNull())
+                            {
+                                vectorDeclarations.push_back(vecDecl);
+                            }
+                        }
+                    });
+            }
+            matcher.run(context);
+            matcher.clear();
+
+            for (auto vdecl : vectorDeclarations)
+            {
+                std::cout << "container declaration:" << std::endl;
+                vdecl.print(rewriter.getSourceMgr());
+            }
         }
     };
 

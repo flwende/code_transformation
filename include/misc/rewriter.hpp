@@ -53,6 +53,11 @@ namespace TRAFO_NAMESPACE
             rewriter(rewriter)
         { ; }
 
+        clang::SourceManager& getSourceMgr() const
+        {
+            return rewriter.getSourceMgr();
+        }
+
         const clang::LangOptions& getLangOpts() const
         {
             return rewriter.getLangOpts();
