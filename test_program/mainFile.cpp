@@ -4,31 +4,37 @@
 // (See accompanying file LICENSE)
 
 #include <iostream>
+#include <iomanip>
 #include <cstdint>
 #include <cmath>
 #include <vector>
 #include "classA.hpp"
+#include "classB.hpp"
+#include "prefix_sum.hpp"
 
-using real_t = float;
+static std::vector<float> f;
 
 int main(int argc, char** argv)
 {
     std::size_t n = (argc > 1 ? atoi(argv[1]) : 16);
     std::vector<fw::A<real_t, 3>> x(n);
     std::vector<std::vector<fw::A<real_t, 3>>> y(1);
+    std::vector<fw::B> ps(n);
     y[0].resize(n);
-    std::vector<float> f;
 
     srand48(1);
     for (std::size_t i = 0; i < n; ++i)
     {
-        x[i] = 2.0F;
+        x[i] = drand48();
         y[0][i].x = std::sqrt(x[i].y);
     }
 
+    ps = prefix_sum(x, 'y');
+
+    std::cout << std::fixed << std::setprecision(4);
     for (std::size_t i = 0; i < n; ++i)
     {
-        std::cout << x[i] << ", " << y[0][i] << std::endl;
+        std::cout << x[i] << ", " << y[0][i] << ", " << ps[i] << std::endl;
     }
 
     return 0;

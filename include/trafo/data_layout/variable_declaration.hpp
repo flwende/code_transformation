@@ -36,6 +36,7 @@ namespace TRAFO_NAMESPACE
 
             void print(clang::SourceManager& sm) const
             {
+                std::cout << "\t* variable name: " << decl.getNameAsString() << std::endl;
                 std::cout << "\t* range: " << sourceRange.printToString(sm) << std::endl;
                 std::cout << "\t* element data type: " << dataType.getAsString();
                 if (dataType.getAsString() != dataTypeName)
@@ -74,28 +75,24 @@ namespace TRAFO_NAMESPACE
                 std::uint32_t nestingLevel = 0;
                 clang::QualType innerMostType;
 
-                // in the first instance 'type' is either a class or structur type: it is the vector itself
+                // in the first instance 'type' is either a class or structur type: it is the container type itself
                 const clang::Type* type = decl.getType().getTypePtrOrNull();
                 while (type != nullptr && (type->isClassType() || type->isStructureType()))
                 {
-                    // we can do this as any variable declaration of type vector is a specialzation of vector<T,..>
+                    // we can do this as any variable declaration of the container is a specialzation of containerType<T,..>
                     const clang::TemplateSpecializationType* tsType = type->getAs<clang::TemplateSpecializationType>();
                     if (tsType != nullptr && tsType->getNumArgs() > 0)
                     {
-                        // break condition for the outer loop!
-                        // if the current template argument type is again a vector, 'type' will be reassigned
-                        type = nullptr;
-
-                        // the first template argument is the type of the content of the vector
+                        // the first template argument is the type of the content of the container
                         clang::QualType taQualType = tsType->getArg(0).getAsType();
                         const clang::Type* taType = taQualType.getTypePtrOrNull();
-                        // if it is a class or structure type, check for it being a vector
+                        // if it is a class or structure type, check for it being a containerType
                         if (taType != nullptr && (taType->isClassType() || taType->isStructureType()))
                         {
                             clang::CXXRecordDecl* decl = taType->getAsCXXRecordDecl();
                             if (decl != nullptr)
                             {
-                                // if it is a vector, get nesting information and continue the loop execution
+                                // if it is a container, get nesting information and continue the loop execution
                                 if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType)), context))
                                 {
                                     isNested |= true;
@@ -108,6 +105,9 @@ namespace TRAFO_NAMESPACE
                         // this point is reached if the a non-vector type has been encountered
                         innerMostType = taQualType;
                     }
+                    // break condition for the outer loop!
+                    // this point is reached only if the current template argument type is not the specified container type
+                    type = nullptr;
                 }
 
                 return ContainerDeclaration(decl, isNested, nestingLevel, innerMostType);

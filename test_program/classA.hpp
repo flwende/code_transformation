@@ -9,6 +9,8 @@
 #include <iostream>
 #include <cstdint>
 
+using real_t = float;
+
 namespace fw
 {
     template <typename T, std::size_t D>
@@ -38,7 +40,7 @@ namespace fw
     };
 
     template <typename T>
-    std::ostream& operator<<(std::ostream& os, const A<T, 3>& a)
+    static std::ostream& operator<<(std::ostream& os, const A<T, 3>& a)
     {
         os << "(" << a.x << "," << a.y << "," << a.z << ")";
         return os;
