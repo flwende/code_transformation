@@ -23,25 +23,25 @@ namespace TRAFO_NAMESPACE
         {
             const clang::VarDecl& decl;
             const clang::SourceRange sourceRange;
-            const clang::QualType dataType;
-            const std::string dataTypeName;
+            const clang::QualType elementDataType;
+            const std::string elementDataTypeName;
 
-            Declaration(const clang::VarDecl& decl, const clang::QualType dataType)
+            Declaration(const clang::VarDecl& decl, const clang::QualType elementDataType)
                 :
                 decl(decl),
                 sourceRange(decl.getSourceRange()),
-                dataType(dataType),
-                dataTypeName(getDataTypeName(dataType))
+                elementDataType(elementDataType),
+                elementDataTypeName(getDataTypeName(elementDataType))
             { ; }
 
             void print(clang::SourceManager& sm) const
             {
                 std::cout << "\t* variable name: " << decl.getNameAsString() << std::endl;
                 std::cout << "\t* range: " << sourceRange.printToString(sm) << std::endl;
-                std::cout << "\t* element data type: " << dataType.getAsString();
-                if (dataType.getAsString() != dataTypeName)
+                std::cout << "\t* element data type: " << elementDataType.getAsString();
+                if (elementDataType.getAsString() != elementDataTypeName)
                 {
-                    std::cout << " (" << dataTypeName << ")";
+                    std::cout << " (" << elementDataTypeName << ")";
                 }
                 std::cout << std::endl;
             }
@@ -52,16 +52,16 @@ namespace TRAFO_NAMESPACE
             using Base = Declaration;
             using Base::decl;
             using Base::sourceRange;
-            using Base::dataType;
-            using Base::dataTypeName;
+            using Base::elementDataType;
+            using Base::elementDataTypeName;
 
             const clang::QualType containerType;
             const bool isNested;
             const std::uint32_t nestingLevel;
 
-            ContainerDeclaration(const clang::VarDecl& decl, const bool isNested, const std::uint32_t nestingLevel, const clang::QualType dataType)
+            ContainerDeclaration(const clang::VarDecl& decl, const bool isNested, const std::uint32_t nestingLevel, const clang::QualType elementDataType)
                 :
-                Base(decl, dataType),
+                Base(decl, elementDataType),
                 containerType(decl.getType()),
                 isNested(isNested),
                 nestingLevel(nestingLevel)

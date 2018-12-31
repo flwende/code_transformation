@@ -11,26 +11,31 @@
 
 namespace fw
 {
+    template <typename T>
+    class B;
+
+    template <typename T>
     class B
     {
         std::size_t dummy;
     public:
         B() : v(0), w(0) { ; }
-        B(const double value) : v(value), w(value) { ; }
+        B(const T value) : v(value), w(value) { ; }
         B(const B& rhs) : v(rhs.v), w(rhs.w) { ; }
 
-        B& operator=(const double value)
+        B& operator=(const T value)
         {
             v = value;
             w = value;
             return *this;    
         }
 
-        double v;
-        double w;
+        T v;
+        T w;
     };
 
-    static std::ostream& operator<<(std::ostream& os, const B& b)
+    template <typename T>
+    std::ostream& operator<<(std::ostream& os, const B<T>& b)
     {
         os << "(" << b.v << "," << b.w << ")";
         return os;

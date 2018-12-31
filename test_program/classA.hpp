@@ -17,6 +17,27 @@ namespace fw
     class A;
 
     template <typename T>
+    class A<T, 2>
+    {
+        static constexpr std::size_t D = 2;
+        using fundamental_type = T;
+    public:
+        A() : x(0), y(0) { ; }
+        A(const T value) : x(value), y(value) { ; }
+        A(const A& rhs) : x(rhs.x), y(rhs.y) { ; }
+
+        A& operator=(const T value)
+        {
+            x = value;
+            y = value;
+            return *this;    
+        }
+
+        T x;
+        T y;
+    };
+
+    template <typename T>
     class A<T, 3>
     {
         static constexpr std::size_t D = 3;

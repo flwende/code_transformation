@@ -63,6 +63,11 @@ namespace TRAFO_NAMESPACE
             return rewriter.getLangOpts();
         }
 
+        clang::RewriteBuffer& getEditBuffer(clang::FileID FID)
+        {
+            return rewriter.getEditBuffer(FID);
+        }
+
         bool insert(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
         {
             return rewriter.InsertText(sourceLocation, text, insertAfter, indentNewLines);

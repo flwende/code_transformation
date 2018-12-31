@@ -8,7 +8,9 @@
 
 #include <iostream>
 #include <string>
+#include <memory>
 #include <vector>
+#include <set>
 
 #include <clang/AST/AST.h>
 #include <clang/AST/ASTConsumer.h>
@@ -35,7 +37,7 @@
 namespace TRAFO_NAMESPACE
 {
     using namespace TRAFO_NAMESPACE::internal;
-
+    /*
     class ClassDefinition : public clang::ast_matchers::MatchFinder::MatchCallback
     {
     protected:
@@ -241,22 +243,24 @@ namespace TRAFO_NAMESPACE
             }
         }
     };
-
+    */
     class InsertProxyClassImplementation : public clang::ASTConsumer
     {
         Rewriter rewriter;
-        CXXClassDefinition cxxClassHandler;
-        ClassTemplateDefinition classTemplateHandler;
+        //CXXClassDefinition cxxClassHandler;
+        //ClassTemplateDefinition classTemplateHandler;
         
         std::vector<ContainerDeclaration> vectorDeclarations;
+        std::set<std::string> proxyClassCandidateNames;
+        std::vector<std::unique_ptr<ClassMetaData>> proxyClassCandidates;
         
     public:
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter) 
             :
-            rewriter(clangRewriter),
-            cxxClassHandler(rewriter),
-            classTemplateHandler(rewriter)
+            rewriter(clangRewriter)//,
+            //cxxClassHandler(rewriter),
+            //classTemplateHandler(rewriter)
         { ; }
 
         void HandleTranslationUnit(clang::ASTContext& context) override
@@ -268,8 +272,13 @@ namespace TRAFO_NAMESPACE
             matcher.addMatcher(classTemplateDecl().bind("classTemplateDecl"), &classTemplateHandler);
             matcher.matchAST(context);
             */
+            std::cout << "run" << std::endl;
 
-            // 1. step: find all relevant container declarations
+            vectorDeclarations.clear();
+            proxyClassCandidateNames.clear();
+            proxyClassCandidates.clear();
+
+            // step 1: find all relevant container declarations
             std::vector<std::string> containerNames;
             containerNames.push_back("vector");
 
@@ -282,20 +291,168 @@ namespace TRAFO_NAMESPACE
                         if (const clang::VarDecl* decl = result.Nodes.getNodeAs<clang::VarDecl>("varDecl"))
                         {
                             ContainerDeclaration vecDecl = ContainerDeclaration::make(*decl, context, containerName);
-                            if (!vecDecl.dataType.isNull())
+                            if (!vecDecl.elementDataType.isNull() && !vecDecl.elementDataType.isTrivialType(context))
                             {
                                 vectorDeclarations.push_back(vecDecl);
+                                proxyClassCandidateNames.insert(vecDecl.elementDataTypeName);
                             }
                         }
                     });
             }
             matcher.run(context);
             matcher.clear();
-
-            for (auto vdecl : vectorDeclarations)
+            /*
+            for (auto vecDecl : vectorDeclarations)
             {
-                std::cout << "container declaration:" << std::endl;
-                vdecl.print(rewriter.getSourceMgr());
+                std::cout << "DECLARATION" << std::endl;
+                vecDecl.print(rewriter.getSourceMgr());
+            }
+            */
+            // step 2: check if element data type is candidate for proxy class generation
+            for (auto className : proxyClassCandidateNames)
+            {
+                std::cout << "processing: " << className << std::endl;
+#if defined(old)
+                //matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("classDecl"),
+                //matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl"),
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition())).bind("classDecl"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
+                        {
+                            std::cout << "CLASS DEFINITION: " << decl->getNameAsString() << std::endl;
+                            clang::ClassTemplateDecl* tdecl = decl->getDescribedClassTemplate();
+                            if (tdecl != nullptr)
+                            {
+                                std::cout << "\t" << tdecl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                                std::cout << "\ttemplate class" << std::endl;
+                                Matcher localMatcher;
+                                bool instantiated = false;
+                                localMatcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("decl"),
+                                    [&] (const MatchFinder::MatchResult& result) mutable
+                                    {
+                                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("decl"))
+                                        {
+                                            instantiated = true;
+                                        }
+                                    });
+                                localMatcher.run(context);
+                                localMatcher.clear();
+                                if (instantiated)
+                                {
+                                    std::cout << "\tinstantiated" << std::endl;
+                                }
+                            }
+                            else
+                            {
+                                std::cout << "\t" << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                            }
+                            /*
+                            if (Matcher::testDecl(*decl, cxxRecordDecl(isInstantiated()), context))
+                            {
+                                std::cout << "\tinstantiated" << std::endl;
+                            }
+                            */
+                            targetClasses.emplace_back(*decl, *result.Context);
+                            ClassMetaData& thisClass = targetClasses.back();
+                            if (!thisClass.isProxyClassCandidate)
+                            {
+                                targetClasses.pop_back();
+                            }
+                            /*
+                            if (!thisClass.isProxyClassCandidate)
+                            {
+                                targetClasses.pop_back();
+                            }
+                            */
+                        }
+                    });
+#else
+                matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classDecl"),
+                    [this] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl"))
+                        {
+                            const std::string className = decl->getNameAsString();
+                            // if there are some proxy class candidates, try to add the definition
+                            if (proxyClassCandidates.size() > 0)
+                            {
+                                for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                                {
+                                    if (proxyClassCandidates[i]->isTemplated)
+                                    {
+                                        TemplateClassMetaData* thisCandidate = reinterpret_cast<TemplateClassMetaData*>(proxyClassCandidates[i].get());
+                                        if (thisCandidate->addDefinition(*(decl->getTemplatedDecl()))) return;
+                                    }
+                                }
+                            }
+                            // if success was not achieved, add a new proxy class candidate
+                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(decl->getNameAsString(), *decl));                            
+                        }
+                    });
+
+                matcher.addMatcher(classTemplateSpecializationDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("classDecl"),
+                    [this] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateSpecializationDecl>("classDecl"))
+                        {
+                            const std::string className = decl->getNameAsString();
+                            // if there are some proxy class candidates, try to add the definition
+                            if (proxyClassCandidates.size() > 0)
+                            {
+                                for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                                {
+                                    if (proxyClassCandidates[i]->isTemplated)
+                                    {
+                                        TemplateClassMetaData* thisCandidate = reinterpret_cast<TemplateClassMetaData*>(proxyClassCandidates[i].get());
+                                        if (thisCandidate->addDefinition(*decl, true)) return;
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition())).bind("classDecl"),
+                    [this] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
+                        {
+                            const std::string className = decl->getNameAsString();
+                            
+                            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                            {
+                                if (proxyClassCandidates[i]->name == className && proxyClassCandidates[i]->isTemplated) return;
+                            }
+
+                            proxyClassCandidates.emplace_back(new CXXClassMetaData(className, *decl));
+                        }
+                    });
+#endif
+            }
+            matcher.run(context);
+            matcher.clear();
+
+            /*
+            // step 3: generate proxy classes
+            for (auto thisClass : targetClasses)
+            {
+                // backup the original buffer content
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(thisClass.decl.getSourceRange().getBegin()));
+                std::string originalBufferStr;
+                llvm::raw_string_ostream originalBuffer(originalBufferStr);
+                rewriteBuffer.write(originalBuffer);
+
+                rewriter.insert(thisClass.decl.getSourceRange().getBegin(), "\n\nSOME TEXT\n\n", true, true);            
+                rewriteBuffer.write(llvm::outs());
+
+                rewriteBuffer.Initialize(originalBuffer.str());
+                rewriteBuffer.write(llvm::outs());
+            }
+            */
+
+            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+            {
+                proxyClassCandidates[i]->printInfo(rewriter.getSourceMgr());
             }
         }
     };
@@ -310,7 +467,7 @@ namespace TRAFO_NAMESPACE
         
         void EndSourceFileAction() override
         {
-            rewriter.getEditBuffer(rewriter.getSourceMgr().getMainFileID()).write(llvm::outs());
+            //rewriter.getEditBuffer(rewriter.getSourceMgr().getMainFileID()).write(llvm::outs());
         }
         
         std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& ci, llvm::StringRef file) override

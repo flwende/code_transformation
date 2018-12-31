@@ -19,6 +19,7 @@ namespace TRAFO_NAMESPACE
 {
     namespace internal
     {
+#if defined(old)
         class ClassMetaData
         {
             struct AccessSpecifier
@@ -152,7 +153,6 @@ namespace TRAFO_NAMESPACE
             clang::ASTContext& context;
             const std::string name;
             const bool isStruct;
-            const bool isTemplated;
             const std::uint32_t numFields;
             std::uint32_t numPublicFields;
             bool hasNonFundamentalPublicFields;
@@ -168,18 +168,17 @@ namespace TRAFO_NAMESPACE
             // proxy class candidates must be class definitions and no specializations in case of template classes
             // note: a template class specialization is of type CXXRecordDecl, and we need to check for its describing template class
             //       (if it does not exist, then it is a normal C++ class)
-            ClassMetaData(const clang::CXXRecordDecl& decl, clang::ASTContext& context, const bool isTemplated)
+            ClassMetaData(const clang::CXXRecordDecl& decl, clang::ASTContext& context)
                 :
                 decl(decl),
                 context(context),
                 name(decl.getNameAsString()),                
                 isStruct(Matcher::testDecl(decl, clang::ast_matchers::recordDecl(clang::ast_matchers::isStruct()), context)),
-                isTemplated(isTemplated),
                 numFields(std::distance(decl.field_begin(), decl.field_end())),
                 numPublicFields(0),
                 hasNonFundamentalPublicFields(false),
                 hasMultiplePublicFieldTypes(false),
-                isProxyClassCandidate(numFields > 0 && (isTemplated ? true : decl.getDescribedClassTemplate() == nullptr) &&
+                isProxyClassCandidate(numFields > 0 && (decl.getDescribedClassTemplate() == nullptr) &&
                                         !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty()))
             {
                 if (isProxyClassCandidate)
@@ -204,6 +203,154 @@ namespace TRAFO_NAMESPACE
                 }
             }
         };
+#else
+        class ClassMetaData
+        {
+        public:
+
+            const std::string name;
+            const bool isTemplated;
+
+            ClassMetaData(const std::string name, const bool isTemplated)
+                :
+                name(name),
+                isTemplated(isTemplated)
+            { ; }
+
+            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const = 0;
+        };
+
+        class CXXClassMetaData : public ClassMetaData
+        {
+            using Base = ClassMetaData;
+
+        public:
+
+            using Base::name;
+            const clang::CXXRecordDecl& decl;
+            clang::SourceRange sourceRange;
+
+            CXXClassMetaData(const std::string name, const clang::CXXRecordDecl& decl)
+                :
+                Base(name, false),
+                decl(decl),
+                sourceRange(decl.getDescribedClassTemplate() ? decl.getDescribedClassTemplate()->getSourceRange() : decl.getSourceRange())
+            { ; }
+
+            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+            {
+                std::cout << indent << "C++ Class: " << name << std::endl;
+                std::cout << indent << "\tdefinition: " << sourceRange.printToString(sm) << std::endl;
+            }
+        };
+
+        class TemplateClassMetaData : public ClassMetaData
+        {
+            using Base = ClassMetaData;
+
+            class Declaration
+            {
+            public:
+
+                const clang::ClassTemplateDecl& decl;
+                clang::SourceRange sourceRange;
+                const bool isDefinition;
+
+                Declaration(const clang::ClassTemplateDecl& decl)
+                    :
+                    decl(decl),
+                    sourceRange(decl.getSourceRange()),
+                    isDefinition(decl.isThisDeclarationADefinition())
+                { ; }
+            };
+
+            class Definition : public CXXClassMetaData
+            {
+                using Base = CXXClassMetaData;
+
+            public:
+
+                using Base::name;
+                using Base::decl;
+                using Base::sourceRange;
+                bool isTemplateSpecialization;
+
+                Definition(const std::string name, const clang::CXXRecordDecl& decl, bool isTemplateSpecialization)
+                    :
+                    Base(name, decl),
+                    isTemplateSpecialization(isTemplateSpecialization)
+                { ; }
+
+                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                {
+                    Base::printInfo(sm, indent);
+                    std::cout << indent << "\tthis is a template class " << (isTemplateSpecialization ? "specialization" : "definition") << std::endl;
+                }
+            };
+
+        public:
+            
+            using Base::name;
+            Declaration declaration;
+            std::vector<Definition> definitions;
+
+            TemplateClassMetaData(const std::string name, const clang::ClassTemplateDecl& decl)
+                :
+                Base(name, true),
+                declaration(decl)
+            { 
+                if (declaration.isDefinition)
+                {
+                    definitions.emplace_back(name, *(decl.getTemplatedDecl()), false);
+                }
+            }
+
+            bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplateSpecialization = false)
+            {
+                if (!decl.isThisDeclarationADefinition()) return false;
+
+                clang::ClassTemplateDecl* tDecl = decl.getDescribedClassTemplate();
+                clang::SourceRange sourceRange = (tDecl != nullptr ? tDecl->getSourceRange() : decl.getSourceRange());
+
+                const std::string className = decl.getNameAsString();
+                if (name == className)
+                {
+                    for (std::size_t i = 0; i < definitions.size(); ++i)
+                    {
+                        if (sourceRange == definitions[i].sourceRange) 
+                        {
+                            if (!isTemplateSpecialization)
+                            {
+                                definitions[i].isTemplateSpecialization = false;
+                            }
+
+                            return true;
+                        }
+                    }
+                    
+                    // no? then add this definition!
+                    definitions.emplace_back(className, decl, isTemplateSpecialization);
+
+                    return true;
+                }
+
+                return false;
+            }
+
+            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+            {
+                std::cout << "C++ Template Class: " << name << std::endl;
+                std::cout << "\tdeclaration is definition: " << (declaration.isDefinition ? "yes" : "no") << std::endl;
+                std::cout << "\tdeclaration: " << declaration.sourceRange.printToString(sm) << std::endl;
+                std::cout << "\tdefinitions..." << std::endl;
+                for (auto definition : definitions)
+                {
+                    definition.printInfo(sm, "\t\t");
+                }
+                std::cout << "\t...definitions" << std::endl;
+            }
+        };
+#endif
     }
 }
 
