@@ -11,34 +11,41 @@
 
 namespace fw
 {
-    template <typename T>
-    class B;
-
-    template <typename T>
-    class B
+    namespace extra
     {
-        std::size_t dummy;
-    public:
-        B() : v(0), w(0) { ; }
-        B(const T value) : v(value), w(value) { ; }
-        B(const B& rhs) : v(rhs.v), w(rhs.w) { ; }
+        template <typename T>
+        class B;
 
-        B& operator=(const T value)
+        template <typename T>
+        class B
         {
-            v = value;
-            w = value;
-            return *this;    
+        private:
+            const std::size_t dummy;
+        public:
+            B() : dummy(0), v(0), w(0) { ; }
+            B(const T value) : dummy(1), v(value), w(value) { ; }
+            B(const B& rhs) : dummy(rhs.dummy), v(rhs.v), w(rhs.w) { ; }
+
+            B& operator=(const T value)
+            {
+                v = value;
+                w = value;
+                return *this;    
+            }
+
+            T v;
+        protected:
+            T x;
+        public:
+            T w;
+        };
+
+        template <typename T>
+        std::ostream& operator<<(std::ostream& os, const B<T>& b)
+        {
+            os << "(" << b.v << "," << b.w << ")";
+            return os;
         }
-
-        T v;
-        T w;
-    };
-
-    template <typename T>
-    std::ostream& operator<<(std::ostream& os, const B<T>& b)
-    {
-        os << "(" << b.v << "," << b.w << ")";
-        return os;
     }
 }
 

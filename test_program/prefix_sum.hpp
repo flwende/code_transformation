@@ -10,6 +10,6 @@
 #include "classA.hpp"
 #include "classB.hpp"
 
-std::vector<fw::B<real_t>> prefix_sum(const std::vector<fw::A<real_t, 3>>& x, const char component);
+std::vector<fw::extra::B<real_t>> prefix_sum(const std::vector<fw::A<real_t, 3>>& x, const char component);
 
 #endif

@@ -250,10 +250,34 @@ namespace TRAFO_NAMESPACE
         //CXXClassDefinition cxxClassHandler;
         //ClassTemplateDefinition classTemplateHandler;
         
-        std::vector<ContainerDeclaration> vectorDeclarations;
+        std::vector<ContainerDeclaration> containerDeclarations;
         std::set<std::string> proxyClassCandidateNames;
         std::vector<std::unique_ptr<ClassMetaData>> proxyClassCandidates;
         
+        bool isThisClassInstantiated(const clang::CXXRecordDecl* decl)
+        {
+            using namespace clang::ast_matchers;
+
+            bool testResult = false;
+            if (decl == nullptr) return testResult;
+
+            Matcher matcher;
+            matcher.addMatcher(cxxRecordDecl(allOf(hasName(decl->getNameAsString()), isInstantiated())).bind("test"),
+                [&] (const MatchFinder::MatchResult& result) mutable
+                {
+                    if (const clang::CXXRecordDecl* instance = result.Nodes.getNodeAs<clang::CXXRecordDecl>("test"))
+                    {
+                        if (instance->getSourceRange() == decl->getSourceRange())
+                        {
+                            testResult = true;
+                        }
+                    }
+                });
+            matcher.run(decl->getASTContext());
+                            
+            return testResult;                
+        }
+
     public:
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter) 
@@ -266,23 +290,116 @@ namespace TRAFO_NAMESPACE
         void HandleTranslationUnit(clang::ASTContext& context) override
         {	
             using namespace clang::ast_matchers;
-            /*
-            MatchFinder matcher;
-            matcher.addMatcher(cxxRecordDecl(allOf(isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl"), &cxxClassHandler);
-            matcher.addMatcher(classTemplateDecl().bind("classTemplateDecl"), &classTemplateHandler);
-            matcher.matchAST(context);
-            */
-            std::cout << "run" << std::endl;
-
-            vectorDeclarations.clear();
-            proxyClassCandidateNames.clear();
-            proxyClassCandidates.clear();
+            
+            Matcher matcher;
 
             // step 1: find all relevant container declarations
             std::vector<std::string> containerNames;
             containerNames.push_back("vector");
 
-            Matcher matcher;
+            /*
+            std::vector<std::string> cns;
+            cns.push_back("A");
+            cns.push_back("B");
+            cns.push_back("C");
+
+            for (auto cn : cns)
+            {
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition())).bind("classDecl"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
+                        {
+                            std::cout << "found " << decl->getNameAsString() << std::endl;
+                            if (Matcher::testDecl(*decl, cxxRecordDecl(isTemplateInstantiation()), context))
+                                std::cout << "\ttemplate instantiation" << std::endl;
+                            if (Matcher::testDecl(*decl, cxxRecordDecl(isTemplateInstantiation()), context))
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+
+                matcher.addMatcher(classTemplateDecl(hasName(cn)).bind("classDecl_0"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl_0"))
+                        {
+                            if (decl->isThisDeclarationADefinition()) return;
+
+                            std::cout << "found DECLARATION " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+
+                matcher.addMatcher(classTemplateDecl(hasName(cn)).bind("classDecl_1"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl_1"))
+                        {
+                            if (!decl->isThisDeclarationADefinition()) return;
+
+                            std::cout << "found DEFINITION " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+
+                matcher.addMatcher(classTemplatePartialSpecializationDecl(hasName(cn)).bind("classDecl_2"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplatePartialSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplatePartialSpecializationDecl>("classDecl_2"))
+                        {
+                            std::cout << "found PARTIAL SPECIALIZATION " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+
+                matcher.addMatcher(classTemplateSpecializationDecl(hasName(cn)).bind("classDecl_3"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateSpecializationDecl>("classDecl_3"))
+                        {
+                            std::cout << "found SPECIALIZATION " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition(), isInstantiated())).bind("classDecl_4"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl_4"))
+                        {
+                            std::cout << "found INSTANTIATION " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+
+                            Matcher localMatcher;
+                            localMatcher.addMatcher(fieldDecl(isPublic()).bind("fieldDecl"),
+                                [&] (const MatchFinder::MatchResult& result) mutable
+                                {
+                                    if (const clang::FieldDecl* fdecl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
+                                    {                             
+                                        std::cout << "\t\tfield: " << fdecl->getNameAsString() << std::endl;
+                                        std::cout << "\t\t\trange: " << fdecl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                                    }
+                                }, decl);
+                            localMatcher.run(decl->getASTContext());
+                            localMatcher.clear();
+                        }
+                    });
+
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl_5"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl_5"))
+                        {
+                            std::cout << "found C++ class " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
+                        }
+                    });
+            }
+            matcher.run(context);
+            matcher.clear();
+
+            return;
+            */
             for (auto containerName : containerNames)
             {
                 matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
@@ -293,7 +410,7 @@ namespace TRAFO_NAMESPACE
                             ContainerDeclaration vecDecl = ContainerDeclaration::make(*decl, context, containerName);
                             if (!vecDecl.elementDataType.isNull() && !vecDecl.elementDataType.isTrivialType(context))
                             {
-                                vectorDeclarations.push_back(vecDecl);
+                                containerDeclarations.push_back(vecDecl);
                                 proxyClassCandidateNames.insert(vecDecl.elementDataTypeName);
                             }
                         }
@@ -301,133 +418,88 @@ namespace TRAFO_NAMESPACE
             }
             matcher.run(context);
             matcher.clear();
-            /*
-            for (auto vecDecl : vectorDeclarations)
-            {
-                std::cout << "DECLARATION" << std::endl;
-                vecDecl.print(rewriter.getSourceMgr());
-            }
-            */
+            
+            //clang::NamespaceDecl* namespaceDecl;
+
             // step 2: check if element data type is candidate for proxy class generation
             for (auto className : proxyClassCandidateNames)
             {
-                std::cout << "processing: " << className << std::endl;
-#if defined(old)
-                //matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("classDecl"),
-                //matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl"),
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition())).bind("classDecl"),
+                /*
+                //matcher.addMatcher(namespaceDecl(allOf(hasName("fww"), hasDescendant(namedDecl(hasName(className))))).bind("namespaceDecl"),
+                matcher.addMatcher(namespaceDecl(hasDescendant(namedDecl(hasName(className)))).bind("namespaceDecl"),
                     [&] (const MatchFinder::MatchResult& result) mutable
                     {
-                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
+                        if (const clang::NamespaceDecl* decl = result.Nodes.getNodeAs<clang::NamespaceDecl>("namespaceDecl"))
                         {
-                            std::cout << "CLASS DEFINITION: " << decl->getNameAsString() << std::endl;
-                            clang::ClassTemplateDecl* tdecl = decl->getDescribedClassTemplate();
-                            if (tdecl != nullptr)
-                            {
-                                std::cout << "\t" << tdecl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                                std::cout << "\ttemplate class" << std::endl;
-                                Matcher localMatcher;
-                                bool instantiated = false;
-                                localMatcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("decl"),
-                                    [&] (const MatchFinder::MatchResult& result) mutable
-                                    {
-                                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("decl"))
-                                        {
-                                            instantiated = true;
-                                        }
-                                    });
-                                localMatcher.run(context);
-                                localMatcher.clear();
-                                if (instantiated)
-                                {
-                                    std::cout << "\tinstantiated" << std::endl;
-                                }
-                            }
-                            else
-                            {
-                                std::cout << "\t" << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                            }
-                            /*
-                            if (Matcher::testDecl(*decl, cxxRecordDecl(isInstantiated()), context))
-                            {
-                                std::cout << "\tinstantiated" << std::endl;
-                            }
-                            */
-                            targetClasses.emplace_back(*decl, *result.Context);
-                            ClassMetaData& thisClass = targetClasses.back();
-                            if (!thisClass.isProxyClassCandidate)
-                            {
-                                targetClasses.pop_back();
-                            }
-                            /*
-                            if (!thisClass.isProxyClassCandidate)
-                            {
-                                targetClasses.pop_back();
-                            }
-                            */
+                            std::cout << "FOUND NAMESPACE: " << decl->getNameAsString() << std::endl;
+                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
                         }
                     });
-#else
-                matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classDecl"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                    */
+
+                // template class declarations
+                matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classTemplateDeclaration"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
                     {
-                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl"))
+                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDeclaration"))
                         {
-                            const std::string className = decl->getNameAsString();
-                            // if there are some proxy class candidates, try to add the definition
-                            if (proxyClassCandidates.size() > 0)
+                            if (decl->isThisDeclarationADefinition()) return;
+                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, false));
+                        }
+                    });
+                
+                // template class definitions
+                matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classTemplateDefinition"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDefinition"))
+                        {
+                            if (!decl->isThisDeclarationADefinition()) return;
+
+                            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
                             {
-                                for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
-                                {
-                                    if (proxyClassCandidates[i]->isTemplated)
-                                    {
-                                        TemplateClassMetaData* thisCandidate = reinterpret_cast<TemplateClassMetaData*>(proxyClassCandidates[i].get());
-                                        if (thisCandidate->addDefinition(*(decl->getTemplatedDecl()))) return;
-                                    }
-                                }
+                                if (proxyClassCandidates[i]->addDefinition(*(decl->getTemplatedDecl()))) return;
                             }
-                            // if success was not achieved, add a new proxy class candidate
-                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(decl->getNameAsString(), *decl));                            
+                                       
+                            // not found
+                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, true));
+                            proxyClassCandidates.back()->addDefinition(*(decl->getTemplatedDecl()));
                         }
                     });
 
-                matcher.addMatcher(classTemplateSpecializationDecl(allOf(hasName(className), isDefinition(), isInstantiated())).bind("classDecl"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::ClassTemplateSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateSpecializationDecl>("classDecl"))
-                        {
-                            const std::string className = decl->getNameAsString();
-                            // if there are some proxy class candidates, try to add the definition
-                            if (proxyClassCandidates.size() > 0)
-                            {
-                                for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
-                                {
-                                    if (proxyClassCandidates[i]->isTemplated)
-                                    {
-                                        TemplateClassMetaData* thisCandidate = reinterpret_cast<TemplateClassMetaData*>(proxyClassCandidates[i].get());
-                                        if (thisCandidate->addDefinition(*decl, true)) return;
-                                    }
-                                }
-                            }
-                        }
-                    });
 
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition())).bind("classDecl"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                // template class partial specialization
+                matcher.addMatcher(classTemplatePartialSpecializationDecl(hasName(className)).bind("classTemplatePartialSpecialization"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
                     {
-                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
+                        if (const clang::ClassTemplatePartialSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplatePartialSpecializationDecl>("classTemplatePartialSpecialization"))
                         {
-                            const std::string className = decl->getNameAsString();
+                            if (!isThisClassInstantiated(decl)) return;
                             
                             for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
                             {
-                                if (proxyClassCandidates[i]->name == className && proxyClassCandidates[i]->isTemplated) return;
+                                if (proxyClassCandidates[i]->addDefinition(*decl, true)) return;
                             }
-
-                            proxyClassCandidates.emplace_back(new CXXClassMetaData(className, *decl));
                         }
                     });
-#endif
+                    
+                // standard C++ classes
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), unless(isTemplateInstantiation()))).bind("c++Class"),
+                    [&] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("c++Class"))
+                        {
+                            const std::string className = decl->getNameAsString();
+                            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                            {
+                                // if it is a specialization of a template class: skip this class definition
+                                if (proxyClassCandidates[i]->name == className && proxyClassCandidates[i]->isTemplated) return;
+                            }
+                            
+                            proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, true));
+                            proxyClassCandidates.back()->addDefinition(*decl, false);
+                        }
+                    });
             }
             matcher.run(context);
             matcher.clear();

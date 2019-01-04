@@ -11,8 +11,9 @@
 
 namespace fw
 {
-    class C
+    struct C
     {
+    private:
         std::size_t dummy;
     public:
         C() : x(0) { ; }

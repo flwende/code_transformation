@@ -27,6 +27,58 @@ namespace TRAFO_NAMESPACE
             }
             return dataType.getAsString();
         }
+
+        /*
+        template <typename T>
+        struct ClassDecl
+        {
+            static const clang::CXXRecordDecl* getTemplatedDecl(const T& decl)
+            {
+                return &decl;
+            }
+
+            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const T& decl)
+            {
+                return &decl;
+            }
+        };
+
+        template <>
+        struct ClassDecl<clang::ClassTemplateDecl>
+        {
+            static const clang::CXXRecordDecl* getTemplatedDecl(const clang::ClassTemplateDecl& decl)
+            {
+                return decl.getTemplatedDecl();
+            }
+
+            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const clang::CXXRecordDecl& decl)
+            {
+                return decl.getDescribedClassTemplate();
+            }
+        };
+        */
+        struct ClassDecl
+        {
+            static const clang::CXXRecordDecl* getTemplatedDecl(const clang::CXXRecordDecl& decl)
+            {
+                return &decl;
+            }
+
+            static const clang::CXXRecordDecl* getTemplatedDecl(const clang::ClassTemplateDecl& decl)
+            {
+                return decl.getTemplatedDecl();
+            }
+
+            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const clang::ClassTemplateDecl& decl)
+            {
+                return &decl;
+            }
+
+            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const clang::CXXRecordDecl& decl)
+            {
+                return decl.getDescribedClassTemplate();
+            }
+        };
     }
 }
 

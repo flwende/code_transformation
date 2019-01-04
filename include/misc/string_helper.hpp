@@ -6,7 +6,9 @@
 #if !defined(MISC_STRING_HELPER_HPP)
 #define MISC_STRING_HELPER_HPP
 
+#include <sstream>
 #include <string>
+#include <vector>
 #include <clang/AST/AST.h>
 
 #if !defined(TRAFO_NAMESPACE)
@@ -67,6 +69,23 @@ namespace TRAFO_NAMESPACE
             llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
             decl->print(buffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'buffer'
             return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
+        }
+
+        static std::vector<std::string> splitString(const std::string str, const char delimiter)
+        {
+            std::vector<std::string> output;
+            std::string tmp;
+            std::istringstream input(str);
+
+            while (std::getline(input, tmp, delimiter))
+            {
+                if (tmp != "")
+                {
+                    output.push_back(tmp);
+                }
+            }
+
+            return output;
         }
     }
 }

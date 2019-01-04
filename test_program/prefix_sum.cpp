@@ -8,6 +8,7 @@
 #include "classC.hpp"
 
 using namespace fw;
+using namespace fw::extra;
 
 std::vector<B<real_t>> prefix_sum(const std::vector<A<real_t, 3>>& x, const char component)
 {

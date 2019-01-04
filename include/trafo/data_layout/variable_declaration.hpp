@@ -93,7 +93,8 @@ namespace TRAFO_NAMESPACE
                             if (decl != nullptr)
                             {
                                 // if it is a container, get nesting information and continue the loop execution
-                                if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType)), context))
+                                //if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType)), context))
+                                if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType))))
                                 {
                                     isNested |= true;
                                     ++nestingLevel;
@@ -118,10 +119,11 @@ namespace TRAFO_NAMESPACE
                 Base::print(sm);
                 
                 std::cout << "\t* container type: " << containerType.getAsString() << std::endl;
-                std::cout << "\t* nested: " << (isNested ? "yes" : "no") << std::endl;
+                std::cout << "\t\t+-> declaration: " << decl.getSourceRange().printToString(sm) << std::endl;
+                std::cout << "\t\t+-> nested: " << (isNested ? "yes" : "no") << std::endl;
                 if (isNested)
                 {
-                    std::cout << "\t* nesting level: " << nestingLevel << std::endl;
+                    std::cout << "\t\t\t+-> nesting level: " << nestingLevel << std::endl;
                 }
             }
         };
