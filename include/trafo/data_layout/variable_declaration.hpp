@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <string>
+#include <cstdint>
 #include <misc/matcher.hpp>
 #include <misc/ast_helper.hpp>
 

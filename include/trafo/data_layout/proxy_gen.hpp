@@ -7,9 +7,10 @@
 #define TRAFO_DATA_LAYOUT_PROXY_GEN_HPP
 
 #include <iostream>
-#include <string>
 #include <memory>
+#include <string>
 #include <vector>
+#include <cstdint>
 #include <set>
 
 #include <clang/AST/AST.h>
@@ -247,11 +248,10 @@ namespace TRAFO_NAMESPACE
     class InsertProxyClassImplementation : public clang::ASTConsumer
     {
         Rewriter rewriter;
-        //CXXClassDefinition cxxClassHandler;
-        //ClassTemplateDefinition classTemplateHandler;
         
         std::vector<ContainerDeclaration> containerDeclarations;
         std::set<std::string> proxyClassCandidateNames;
+        //std::vector<ClassMetaData*> proxyClassCandidates;
         std::vector<std::unique_ptr<ClassMetaData>> proxyClassCandidates;
         
         bool isThisClassInstantiated(const clang::CXXRecordDecl* decl)
@@ -280,12 +280,21 @@ namespace TRAFO_NAMESPACE
 
     public:
         
-        InsertProxyClassImplementation(clang::Rewriter& clangRewriter) 
+        InsertProxyClassImplementation(clang::Rewriter& clangRewriter)
             :
-            rewriter(clangRewriter)//,
-            //cxxClassHandler(rewriter),
-            //classTemplateHandler(rewriter)
+            rewriter(clangRewriter)
         { ; }
+
+        ~InsertProxyClassImplementation()
+        {
+            /*
+            for (auto candidate : proxyClassCandidates)
+            {
+                delete candidate;
+            }
+            proxyClassCandidates.clear();
+            */
+        }
 
         void HandleTranslationUnit(clang::ASTContext& context) override
         {	
@@ -297,109 +306,6 @@ namespace TRAFO_NAMESPACE
             std::vector<std::string> containerNames;
             containerNames.push_back("vector");
 
-            /*
-            std::vector<std::string> cns;
-            cns.push_back("A");
-            cns.push_back("B");
-            cns.push_back("C");
-
-            for (auto cn : cns)
-            {
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition())).bind("classDecl"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
-                        {
-                            std::cout << "found " << decl->getNameAsString() << std::endl;
-                            if (Matcher::testDecl(*decl, cxxRecordDecl(isTemplateInstantiation()), context))
-                                std::cout << "\ttemplate instantiation" << std::endl;
-                            if (Matcher::testDecl(*decl, cxxRecordDecl(isTemplateInstantiation()), context))
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-
-                matcher.addMatcher(classTemplateDecl(hasName(cn)).bind("classDecl_0"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl_0"))
-                        {
-                            if (decl->isThisDeclarationADefinition()) return;
-
-                            std::cout << "found DECLARATION " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-
-                matcher.addMatcher(classTemplateDecl(hasName(cn)).bind("classDecl_1"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classDecl_1"))
-                        {
-                            if (!decl->isThisDeclarationADefinition()) return;
-
-                            std::cout << "found DEFINITION " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-
-                matcher.addMatcher(classTemplatePartialSpecializationDecl(hasName(cn)).bind("classDecl_2"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::ClassTemplatePartialSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplatePartialSpecializationDecl>("classDecl_2"))
-                        {
-                            std::cout << "found PARTIAL SPECIALIZATION " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-
-                matcher.addMatcher(classTemplateSpecializationDecl(hasName(cn)).bind("classDecl_3"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::ClassTemplateSpecializationDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateSpecializationDecl>("classDecl_3"))
-                        {
-                            std::cout << "found SPECIALIZATION " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition(), isInstantiated())).bind("classDecl_4"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl_4"))
-                        {
-                            std::cout << "found INSTANTIATION " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-
-                            Matcher localMatcher;
-                            localMatcher.addMatcher(fieldDecl(isPublic()).bind("fieldDecl"),
-                                [&] (const MatchFinder::MatchResult& result) mutable
-                                {
-                                    if (const clang::FieldDecl* fdecl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
-                                    {                             
-                                        std::cout << "\t\tfield: " << fdecl->getNameAsString() << std::endl;
-                                        std::cout << "\t\t\trange: " << fdecl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                                    }
-                                }, decl);
-                            localMatcher.run(decl->getASTContext());
-                            localMatcher.clear();
-                        }
-                    });
-
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(cn), isDefinition(), unless(isTemplateInstantiation()))).bind("classDecl_5"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl_5"))
-                        {
-                            std::cout << "found C++ class " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-            }
-            matcher.run(context);
-            matcher.clear();
-
-            return;
-            */
             for (auto containerName : containerNames)
             {
                 matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
@@ -424,19 +330,6 @@ namespace TRAFO_NAMESPACE
             // step 2: check if element data type is candidate for proxy class generation
             for (auto className : proxyClassCandidateNames)
             {
-                /*
-                //matcher.addMatcher(namespaceDecl(allOf(hasName("fww"), hasDescendant(namedDecl(hasName(className))))).bind("namespaceDecl"),
-                matcher.addMatcher(namespaceDecl(hasDescendant(namedDecl(hasName(className)))).bind("namespaceDecl"),
-                    [&] (const MatchFinder::MatchResult& result) mutable
-                    {
-                        if (const clang::NamespaceDecl* decl = result.Nodes.getNodeAs<clang::NamespaceDecl>("namespaceDecl"))
-                        {
-                            std::cout << "FOUND NAMESPACE: " << decl->getNameAsString() << std::endl;
-                            std::cout << "\trange: " << decl->getSourceRange().printToString(rewriter.getSourceMgr()) << std::endl;
-                        }
-                    });
-                    */
-
                 // template class declarations
                 matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classTemplateDeclaration"),
                     [&] (const MatchFinder::MatchResult& result) mutable
@@ -504,6 +397,18 @@ namespace TRAFO_NAMESPACE
             matcher.run(context);
             matcher.clear();
 
+            for (auto& candidate : proxyClassCandidates)
+            {
+                /*
+                if (!candidate->isProxyClassCandidate)
+                {
+                    delete candidate;
+
+                }
+                */
+                candidate->printInfo(rewriter.getSourceMgr());
+            }
+
             /*
             // step 3: generate proxy classes
             for (auto thisClass : targetClasses)
@@ -522,10 +427,12 @@ namespace TRAFO_NAMESPACE
             }
             */
 
-            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+            /*
+            for (auto candidate : proxyClassCandidates)
             {
-                proxyClassCandidates[i]->printInfo(rewriter.getSourceMgr());
+                candidate->printInfo(rewriter.getSourceMgr());
             }
+            */
         }
     };
 

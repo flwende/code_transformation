@@ -14,9 +14,6 @@ namespace fw
     namespace extra
     {
         template <typename T>
-        class B;
-
-        template <typename T>
         class B
         {
         private:
@@ -35,9 +32,9 @@ namespace fw
 
             T v;
         protected:
-            T x;
+            float x;
         public:
-            T w;
+            float w;
         };
 
         template <typename T>
