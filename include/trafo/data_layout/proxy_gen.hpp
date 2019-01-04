@@ -251,7 +251,6 @@ namespace TRAFO_NAMESPACE
         
         std::vector<ContainerDeclaration> containerDeclarations;
         std::set<std::string> proxyClassCandidateNames;
-        //std::vector<ClassMetaData*> proxyClassCandidates;
         std::vector<std::unique_ptr<ClassMetaData>> proxyClassCandidates;
         
         bool isThisClassInstantiated(const clang::CXXRecordDecl* decl)
@@ -306,7 +305,7 @@ namespace TRAFO_NAMESPACE
             std::vector<std::string> containerNames;
             containerNames.push_back("vector");
 
-            for (auto containerName : containerNames)
+            for (auto& containerName : containerNames)
             {
                 matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
                     [&] (const MatchFinder::MatchResult& result) mutable
@@ -328,7 +327,7 @@ namespace TRAFO_NAMESPACE
             //clang::NamespaceDecl* namespaceDecl;
 
             // step 2: check if element data type is candidate for proxy class generation
-            for (auto className : proxyClassCandidateNames)
+            for (auto& className : proxyClassCandidateNames)
             {
                 // template class declarations
                 matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classTemplateDeclaration"),
@@ -349,9 +348,9 @@ namespace TRAFO_NAMESPACE
                         {
                             if (!decl->isThisDeclarationADefinition()) return;
 
-                            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                            for (auto& candidate : proxyClassCandidates)
                             {
-                                if (proxyClassCandidates[i]->addDefinition(*(decl->getTemplatedDecl()))) return;
+                                if (candidate->addDefinition(*(decl->getTemplatedDecl()))) return;
                             }
                                        
                             // not found
@@ -383,10 +382,10 @@ namespace TRAFO_NAMESPACE
                         if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("c++Class"))
                         {
                             const std::string className = decl->getNameAsString();
-                            for (std::size_t i = 0; i < proxyClassCandidates.size(); ++i)
+                            for (auto& candidate : proxyClassCandidates)
                             {
                                 // if it is a specialization of a template class: skip this class definition
-                                if (proxyClassCandidates[i]->name == className && proxyClassCandidates[i]->isTemplated) return;
+                                if (candidate->name == className && candidate->isTemplated) return;
                             }
                             
                             proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, true));

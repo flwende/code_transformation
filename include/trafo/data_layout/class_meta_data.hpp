@@ -61,7 +61,7 @@ namespace TRAFO_NAMESPACE
                 const clang::FieldDecl& decl;
                 const clang::SourceRange sourceRange;
                 const std::string name;
-                const clang::Type* type;
+                std::unique_ptr<const clang::Type> type;
                 const std::string typeName;
                 const AccessSpecifier::Type access;
                 const bool isPublic;
@@ -172,7 +172,7 @@ namespace TRAFO_NAMESPACE
             template <typename T>
             class Declaration
             {
-                const clang::CXXRecordDecl* cxxRecordDecl;
+                std::unique_ptr<const clang::CXXRecordDecl> cxxRecordDecl;
 
             public:
             
@@ -199,7 +199,7 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "* DECLARATION:" << std::endl;
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
                     std::cout << indent << "\t+-> namespace(s):" << std::endl;
-                    for (auto ns : namespaces)
+                    for (auto& ns : namespaces)
                     {
                         ns.printInfo(sm, indent + "\t|\t");
                     }
@@ -224,7 +224,7 @@ namespace TRAFO_NAMESPACE
                     bool hasMultiplePublicFieldTypes = false;
                     bool hasNonFundamentalPublicFields = false;
                     const std::string publicFieldTypeName = ptrPublicFields[0]->typeName;
-                    for (auto field : ptrPublicFields)
+                    for (auto& field : ptrPublicFields)
                     {
                         hasMultiplePublicFieldTypes |= (field->typeName != publicFieldTypeName);
                         hasNonFundamentalPublicFields |= !(field->isFundamentalOrTemplated);
@@ -239,17 +239,17 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceRange sourceRange;
                 const bool isTemplatePartialSpecialization;
                 std::vector<Field> fields;
-                std::vector<Field*> ptrPublicFields;
-                std::vector<Field*> ptrProtectedFields;
-                std::vector<Field*> ptrPrivateFields;
+                std::vector<std::unique_ptr<const Field>> ptrPublicFields;
+                std::vector<std::unique_ptr<const Field>> ptrProtectedFields;
+                std::vector<std::unique_ptr<const Field>> ptrPrivateFields;
                 std::vector<AccessSpecifier> accessSpecifiers;
-                AccessSpecifier* ptrPublicAccess;
-                AccessSpecifier* ptrProtectedAccess;
-                AccessSpecifier* ptrPrivateAccess;
+                std::unique_ptr<const AccessSpecifier> ptrPublicAccess;
+                std::unique_ptr<const AccessSpecifier> ptrProtectedAccess;
+                std::unique_ptr<const AccessSpecifier> ptrPrivateAccess;
                 std::vector<Constructor> constructors;
-                std::vector<Constructor*> ptrPublicConstructors;
-                std::vector<Constructor*> ptrProtectedConstructors;
-                std::vector<Constructor*> ptrPrivateConstructors;
+                std::vector<std::unique_ptr<const Constructor>> ptrPublicConstructors;
+                std::vector<std::unique_ptr<const Constructor>> ptrProtectedConstructors;
+                std::vector<std::unique_ptr<const Constructor>> ptrPrivateConstructors;
                 bool isProxyClassCandidate;
 
                 Definition(const Declaration<T>& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
@@ -259,9 +259,6 @@ namespace TRAFO_NAMESPACE
                     decl(decl),
                     sourceRange(classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
-                    ptrPublicAccess(nullptr),
-                    ptrProtectedAccess(nullptr),
-                    ptrPrivateAccess(nullptr),
                     isProxyClassCandidate(true)
                 {
                     using namespace clang::ast_matchers;
@@ -278,7 +275,7 @@ namespace TRAFO_NAMESPACE
                             if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
                             { \
                                 fields.emplace_back(*decl, AccessSpecifier::Type::ACCESS); \
-                                ptr ## ACCESS ## Fields.push_back(&fields.back()); \
+                                ptr ## ACCESS ## Fields.emplace_back(&fields.back()); \
                             } \
                         }, &decl)
 
@@ -313,7 +310,7 @@ namespace TRAFO_NAMESPACE
                             if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
                             { \
                                 constructors.emplace_back(*decl, AccessSpecifier::Type::ACCESS); \
-                                ptr ## ACCESS ## Constructors.push_back(&constructors.back()); \
+                                ptr ## ACCESS ## Constructors.emplace_back(&constructors.back()); \
                             } \
                         }, &decl)
 
@@ -325,19 +322,19 @@ namespace TRAFO_NAMESPACE
                     matcher.run(decl.getASTContext());
 
                     // set up access pointer
-                    for (auto access : accessSpecifiers)
+                    for (auto& access : accessSpecifiers)
                     {
                         if (ptrPublicAccess == nullptr && access.type == AccessSpecifier::Type::Public)
                         {
-                            ptrPublicAccess = &access;
+                            ptrPublicAccess = std::unique_ptr<AccessSpecifier>(&access);
                         }
                         else if (ptrProtectedAccess == nullptr && access.type == AccessSpecifier::Type::Protected)
                         {
-                            ptrProtectedAccess = &access;
+                            ptrProtectedAccess = std::unique_ptr<AccessSpecifier>(&access);
                         }
                         else if (ptrPrivateAccess == nullptr && access.type == AccessSpecifier::Type::Private)
                         {
-                            ptrPrivateAccess = &access;
+                            ptrPrivateAccess = std::unique_ptr<AccessSpecifier>(&access);
                         }
                     }
 
@@ -353,17 +350,17 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "\t+-> declaration: " << declaration.sourceRange.printToString(sm) << std::endl;
                     std::cout << indent << "\t+-> is template (partial) specialization: " << (isTemplatePartialSpecialization ? "yes" : "no") << std::endl;
                     std::cout << indent << "\t+-> fields: (public/protected/private)=(" << ptrPublicFields.size() << "/" << ptrProtectedFields.size() << "/" << ptrPrivateFields.size() << ")" << std::endl;
-                    for (auto field : fields)
+                    for (auto& field : fields)
                     {
                         field.printInfo(sm, indent + "\t|\t");
                     }
                     std::cout << indent << "\t+-> access specifier:" << std::endl;
-                    for (auto specifier : accessSpecifiers)
+                    for (auto& specifier : accessSpecifiers)
                     {
                         specifier.printInfo(sm, indent + "\t|\t");
                     }
                     std::cout << indent << "\t+-> constructor:" << std::endl;
-                    for (auto constructor : constructors)
+                    for (auto& constructor : constructors)
                     {
                         constructor.printInfo(sm, indent + "\t\t");
                     }
@@ -409,7 +406,7 @@ namespace TRAFO_NAMESPACE
                 const std::string className = decl.getNameAsString();
                 if (className != name) return false;
 
-                for (auto definition : definitions)
+                for (auto& definition : definitions)
                 {
                     // already registered
                     if (decl.getSourceRange() == definition.sourceRange) return true;
@@ -423,7 +420,7 @@ namespace TRAFO_NAMESPACE
             {
                 std::cout << indent << "C++ " << (declaration.isClass ? "class: " : "struct: ") << name << std::endl;
                 declaration.printInfo(sm, indent + "\t");
-                for (auto definition : definitions)
+                for (auto& definition : definitions)
                 {
                     definition.printInfo(sm, indent + "\t");
                 }
@@ -456,7 +453,7 @@ namespace TRAFO_NAMESPACE
                 clang::ClassTemplateDecl* classTemplateDecl = decl.getDescribedClassTemplate();
                 clang::SourceRange sourceRange = (classTemplateDecl != nullptr ? classTemplateDecl->getSourceRange() : decl.getSourceRange());
 
-                for (auto definition : definitions)
+                for (auto& definition : definitions)
                 {
                     // already registered
                     if (sourceRange == definition.sourceRange) return true;
@@ -470,7 +467,7 @@ namespace TRAFO_NAMESPACE
             {
                 std::cout << indent << "C++ template " << (declaration.isClass ? "class: " : "struct: ") << name << std::endl;
                 declaration.printInfo(sm, indent + "\t");
-                for (auto definition : definitions)
+                for (auto& definition : definitions)
                 {
                     definition.printInfo(sm, indent + "\t");
                 }
