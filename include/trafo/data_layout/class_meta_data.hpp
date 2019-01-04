@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
+#include <misc/rewriter.hpp>
 #include <misc/string_helper.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
@@ -169,24 +170,24 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-            template <typename T>
+        public:
+
             class Declaration
             {
                 std::unique_ptr<const clang::CXXRecordDecl> cxxRecordDecl;
 
             public:
             
-                const T& decl;
                 clang::SourceRange sourceRange;
                 std::vector<Namespace> namespaces;
                 const bool isDefinition;
                 const bool isStruct;
                 const bool isClass;
 
+                template <typename T>
                 Declaration(const T& decl, const bool isDefinition)
                     :
                     cxxRecordDecl(ClassDecl::getTemplatedDecl(decl)), // is never nullptr
-                    decl(decl),
                     sourceRange(decl.getSourceRange()),
                     namespaces(Namespace::getFromDecl(decl)),
                     isDefinition(isDefinition),
@@ -207,11 +208,8 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-            template <typename T>
             class Definition
             {
-                const clang::ClassTemplateDecl* classTemplateDecl;
-
                 void testIfProxyClassIsCandidate()
                 {
                     // not abstract, polymorphic, empty
@@ -232,9 +230,11 @@ namespace TRAFO_NAMESPACE
                     isProxyClassCandidate &= !(hasMultiplePublicFieldTypes || hasNonFundamentalPublicFields);
                 }
 
+                std::unique_ptr<const clang::ClassTemplateDecl> classTemplateDecl;
+
             public:
             
-                const Declaration<T>& declaration;
+                const Declaration& declaration;
                 const clang::CXXRecordDecl& decl;
                 const clang::SourceRange sourceRange;
                 const bool isTemplatePartialSpecialization;
@@ -252,7 +252,7 @@ namespace TRAFO_NAMESPACE
                 std::vector<std::unique_ptr<const Constructor>> ptrPrivateConstructors;
                 bool isProxyClassCandidate;
 
-                Definition(const Declaration<T>& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
+                Definition(const Declaration& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
                     :
                     classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
                     declaration(declaration),
@@ -366,19 +366,25 @@ namespace TRAFO_NAMESPACE
                     }
                 }
             };
-            
+
         public:
 
             const std::string name;
-            const bool isTemplated;
+            bool containsProxyClassCandidates;
             
-            ClassMetaData(const std::string name, const bool isTemplated)
+            ClassMetaData(const std::string name)
                 :
                 name(name),
-                isTemplated(isTemplated)
+                containsProxyClassCandidates(false)
             { ; }
 
+            virtual bool isTemplated() const = 0;
+
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false) = 0;
+
+            virtual const std::vector<Definition>& getDefinitions() const = 0;
+
+            virtual const clang::SourceLocation getSourceLocation() const = 0;
 
             virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const = 0;
         };
@@ -387,18 +393,22 @@ namespace TRAFO_NAMESPACE
         {
             using Base = ClassMetaData;
 
-        public:
+            const Base::Declaration declaration;
+            std::vector<Base::Definition> definitions;
 
-            using Base::name;
-            const Base::Declaration<clang::CXXRecordDecl> declaration;
-            std::vector<Base::Definition<clang::CXXRecordDecl>> definitions;
+        public:
 
             CXXClassMetaData(const clang::CXXRecordDecl& decl, const bool isDefinition)
                 :
-                Base(decl.getNameAsString(), false),
+                Base(decl.getNameAsString()),
                 declaration(decl, isDefinition)
             {
                 ;
+            }
+
+            virtual bool isTemplated() const
+            {
+                return false;
             }
 
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
@@ -412,8 +422,26 @@ namespace TRAFO_NAMESPACE
                     if (decl.getSourceRange() == definition.sourceRange) return true;
                 }
 
+                // there can be only one definition for a CXXRecordDecl
+                if (definitions.size() > 0)
+                {
+                    std::cerr << "error in CXXClassMetaData::addDefinition() : definition is already there" << std::endl;
+                }
+
                 definitions.emplace_back(declaration, decl, isTemplatePartialSpecialization);
+                containsProxyClassCandidates |= definitions.back().isProxyClassCandidate;
+
                 return true;
+            }
+
+            virtual const std::vector<Base::Definition>& getDefinitions() const
+            {
+                return definitions;
+            }
+
+            virtual const clang::SourceLocation getSourceLocation() const
+            {
+                return declaration.sourceRange.getBegin();
             }
 
             virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const
@@ -431,18 +459,22 @@ namespace TRAFO_NAMESPACE
         {
             using Base = ClassMetaData;
 
-        public:
+            const Base::Declaration declaration;
+            std::vector<Base::Definition> definitions;
 
-            using Base::name;
-            const Base::Declaration<clang::ClassTemplateDecl> declaration;
-            std::vector<Base::Definition<clang::ClassTemplateDecl>> definitions;
+        public:
 
             TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
                 :
-                Base(decl.getNameAsString(), true),
+                Base(decl.getNameAsString()),
                 declaration(decl, isDefinition)
             {
                 ;
+            }
+
+            virtual bool isTemplated() const
+            {
+                return true;
             }
 
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
@@ -460,7 +492,19 @@ namespace TRAFO_NAMESPACE
                 }
 
                 definitions.emplace_back(declaration, decl, isTemplatePartialSpecialization);
+                containsProxyClassCandidates |= definitions.back().isProxyClassCandidate;
+
                 return true;
+            }
+
+            virtual const std::vector<Base::Definition>& getDefinitions() const
+            {
+                return definitions;
+            }
+
+            virtual const clang::SourceLocation getSourceLocation() const
+            {
+                return declaration.sourceRange.getBegin();
             }
 
             virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const

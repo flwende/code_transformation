@@ -284,17 +284,6 @@ namespace TRAFO_NAMESPACE
             rewriter(clangRewriter)
         { ; }
 
-        ~InsertProxyClassImplementation()
-        {
-            /*
-            for (auto candidate : proxyClassCandidates)
-            {
-                delete candidate;
-            }
-            proxyClassCandidates.clear();
-            */
-        }
-
         void HandleTranslationUnit(clang::ASTContext& context) override
         {	
             using namespace clang::ast_matchers;
@@ -324,8 +313,6 @@ namespace TRAFO_NAMESPACE
             matcher.run(context);
             matcher.clear();
             
-            //clang::NamespaceDecl* namespaceDecl;
-
             // step 2: check if element data type is candidate for proxy class generation
             for (auto& className : proxyClassCandidateNames)
             {
@@ -358,8 +345,7 @@ namespace TRAFO_NAMESPACE
                             proxyClassCandidates.back()->addDefinition(*(decl->getTemplatedDecl()));
                         }
                     });
-
-
+                
                 // template class partial specialization
                 matcher.addMatcher(classTemplatePartialSpecializationDecl(hasName(className)).bind("classTemplatePartialSpecialization"),
                     [&] (const MatchFinder::MatchResult& result) mutable
@@ -385,7 +371,7 @@ namespace TRAFO_NAMESPACE
                             for (auto& candidate : proxyClassCandidates)
                             {
                                 // if it is a specialization of a template class: skip this class definition
-                                if (candidate->name == className && candidate->isTemplated) return;
+                                if (candidate->name == className && candidate->isTemplated()) return;
                             }
                             
                             proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, true));
@@ -395,43 +381,37 @@ namespace TRAFO_NAMESPACE
             }
             matcher.run(context);
             matcher.clear();
-
+            /*
             for (auto& candidate : proxyClassCandidates)
-            {
-                /*
-                if (!candidate->isProxyClassCandidate)
-                {
-                    delete candidate;
-
-                }
-                */
+            {              
                 candidate->printInfo(rewriter.getSourceMgr());
             }
 
-            /*
+            return;
+            */
             // step 3: generate proxy classes
-            for (auto thisClass : targetClasses)
+            for (auto& candidate : proxyClassCandidates)
             {
+                if (!candidate->containsProxyClassCandidates) continue;
+                candidate->printInfo(rewriter.getSourceMgr());
+                
                 // backup the original buffer content
-                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(thisClass.decl.getSourceRange().getBegin()));
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(candidate->getSourceLocation()));
                 std::string originalBufferStr;
                 llvm::raw_string_ostream originalBuffer(originalBufferStr);
                 rewriteBuffer.write(originalBuffer);
 
-                rewriter.insert(thisClass.decl.getSourceRange().getBegin(), "\n\nSOME TEXT\n\n", true, true);            
-                rewriteBuffer.write(llvm::outs());
-
+                // iterate over candidate definitions
+                for (auto& definition : candidate->getDefinitions())
+                {
+                    rewriter.insert(definition.sourceRange.getBegin(), "\n\nSOME TEXT\n\n", true, true);            
+                    rewriteBuffer.write(llvm::outs());
+                }
+                /*
                 rewriteBuffer.Initialize(originalBuffer.str());
                 rewriteBuffer.write(llvm::outs());
+                */
             }
-            */
-
-            /*
-            for (auto candidate : proxyClassCandidates)
-            {
-                candidate->printInfo(rewriter.getSourceMgr());
-            }
-            */
         }
     };
 
