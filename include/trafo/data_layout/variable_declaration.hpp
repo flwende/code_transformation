@@ -78,10 +78,11 @@ namespace TRAFO_NAMESPACE
 
                 // in the first instance 'type' is either a class or structur type: it is the container type itself
                 const clang::Type* type = decl.getType().getTypePtrOrNull();
-                while (type != nullptr && (type->isClassType() || type->isStructureType()))
+                // check for nested container declaration
+                do
                 {
                     // we can do this as any variable declaration of the container is a specialzation of containerType<T,..>
-                    const clang::TemplateSpecializationType* tsType = type->getAs<clang::TemplateSpecializationType>();
+                    const clang::TemplateSpecializationType* tsType = (type ? type->getAs<clang::TemplateSpecializationType>() : nullptr);
                     if (tsType != nullptr && tsType->getNumArgs() > 0)
                     {
                         // the first template argument is the type of the content of the container
@@ -90,12 +91,11 @@ namespace TRAFO_NAMESPACE
                         // if it is a class or structure type, check for it being a containerType
                         if (taType != nullptr && (taType->isClassType() || taType->isStructureType()))
                         {
-                            clang::CXXRecordDecl* decl = taType->getAsCXXRecordDecl();
-                            if (decl != nullptr)
+                            // if it is a container, get nesting information and continue the loop execution
+                            if (const clang::CXXRecordDecl* decl = taType->getAsCXXRecordDecl())
                             {
                                 // if it is a container, get nesting information and continue the loop execution
-                                //if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType)), context))
-                                if (Matcher::testDecl(*decl, cxxRecordDecl(hasName(containerType))))
+                                if (decl->getNameAsString() == containerType)
                                 {
                                     isNested |= true;
                                     ++nestingLevel;
@@ -111,11 +111,12 @@ namespace TRAFO_NAMESPACE
                     // this point is reached only if the current template argument type is not the specified container type
                     type = nullptr;
                 }
+                while (type != nullptr);
 
                 return ContainerDeclaration(decl, isNested, nestingLevel, innerMostType);
             }
 
-            void print(clang::SourceManager& sm) const
+            void printInfo(clang::SourceManager& sm) const
             {
                 Base::print(sm);
                 
