@@ -277,6 +277,61 @@ namespace TRAFO_NAMESPACE
             return testResult;                
         }
 
+        std::string proxyClassDeclaration(const ClassMetaData::Declaration& declaration, const std::string indent = std::string(""))
+        {
+            std::stringstream proxyClassDeclaration;
+         
+            proxyClassDeclaration << indent << "namespace proxy_internal" << std::endl << "{" << std::endl;
+            if (declaration.templateParameterListSourceRange.isValid())
+            {
+                proxyClassDeclaration << indent << "\t" << dumpSourceRangeToString(declaration.templateParameterListSourceRange, rewriter.getSourceMgr(), rewriter.getLangOpts());
+                proxyClassDeclaration << indent << ">" << std::endl;
+            }
+            proxyClassDeclaration << indent << "\t" << (declaration.isStruct ? "struct " : "class ") << declaration.name << "_proxy;" << std::endl;
+            proxyClassDeclaration << indent << "}";
+
+            return proxyClassDeclaration.str();
+        }
+
+        std::string constructorClassFromProxyClass(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        {
+            std::stringstream constructorDefinition;
+
+            if (definition.hasCopyConstructor)
+            {
+                for (auto& constructor : definition.constructors)
+                {
+                    if (constructor.isCopyConstructor)
+                    {
+                        const clang::ParmVarDecl* parameter = constructor.decl.getParamDecl(0);
+                        constructorDefinition << indent << definition.name << "(const " << definition.name << "_proxy& " << parameter->getNameAsString() << ") ";
+                        
+                        if (const std::uint32_t numInitializers = constructor.decl.getNumCtorInitializers())
+                        {
+                            constructorDefinition << ": ";
+                            std::uint32_t initializerId = 0;
+                            for (auto initializer : constructor.decl.inits())
+                            {
+                                constructorDefinition << dumpSourceRangeToString(initializer->getSourceRange(), rewriter.getSourceMgr(), rewriter.getLangOpts());
+                                constructorDefinition << (++initializerId < numInitializers ? "), " : ") ");
+                            }
+                        }
+
+                        if (constructor.hasBody)
+                        {
+                            constructorDefinition << dumpSourceRangeToString(constructor.decl.getBody()->getSourceRange(), rewriter.getSourceMgr(), rewriter.getLangOpts()) << "}";
+                        }
+                        else
+                        {
+                            constructorDefinition << " { ; }";
+                        }
+                    }
+                }
+            }
+
+            return constructorDefinition.str();
+        }
+
     public:
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter)
@@ -312,7 +367,7 @@ namespace TRAFO_NAMESPACE
             }
             matcher.run(context);
             matcher.clear();
-            
+
             // step 2: check if element data type is candidate for proxy class generation
             for (auto& className : proxyClassCandidateNames)
             {
@@ -362,55 +417,87 @@ namespace TRAFO_NAMESPACE
                     });
                     
                 // standard C++ classes
-                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), isDefinition(), unless(isTemplateInstantiation()))).bind("c++Class"),
+                matcher.addMatcher(cxxRecordDecl(allOf(hasName(className), unless(isTemplateInstantiation()))).bind("c++Class"),
                     [&] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("c++Class"))
                         {
                             const std::string className = decl->getNameAsString();
+                            const bool isDefinition = decl->isThisDeclarationADefinition();
                             for (auto& candidate : proxyClassCandidates)
                             {
                                 // if it is a specialization of a template class: skip this class definition
-                                if (candidate->name == className && candidate->isTemplated()) return;
+                                if (candidate->name == className)
+                                {
+                                    if (candidate->isTemplated()) return;
+                                    if (isDefinition && candidate->addDefinition(*decl, false)) return;
+                                }
                             }
                             
-                            proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, true));
-                            proxyClassCandidates.back()->addDefinition(*decl, false);
+                            proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, isDefinition));
+                            if (isDefinition)
+                            {
+                                proxyClassCandidates.back()->addDefinition(*decl, false);
+                            }
                         }
                     });
             }
             matcher.run(context);
             matcher.clear();
-            /*
-            for (auto& candidate : proxyClassCandidates)
-            {              
-                candidate->printInfo(rewriter.getSourceMgr());
-            }
 
-            return;
-            */
             // step 3: generate proxy classes
             for (auto& candidate : proxyClassCandidates)
             {
                 if (!candidate->containsProxyClassCandidates) continue;
+            
+                std::cout << "############################################################################################################################" << std::endl;
+                std::cout << "### CANDIDATE: ";
                 candidate->printInfo(rewriter.getSourceMgr());
-                
+                std::cout << "############################################################################################################################" << std::endl;
+
                 // backup the original buffer content
                 clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(candidate->getSourceLocation()));
                 std::string originalBufferStr;
                 llvm::raw_string_ostream originalBuffer(originalBufferStr);
                 rewriteBuffer.write(originalBuffer);
-
-                // iterate over candidate definitions
+/*
+                // iterate over candidate definitions: 
                 for (auto& definition : candidate->getDefinitions())
                 {
-                    rewriter.insert(definition.sourceRange.getBegin(), "\n\nSOME TEXT\n\n", true, true);            
+                    rewriter.insert(definition.sourceRange.getBegin(), "TRANSFORM INTO PROXY\n", true, true);            
                     rewriteBuffer.write(llvm::outs());
                 }
-                /*
+*/              
+                // insert proxy class forward declaration
+                const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
                 rewriteBuffer.Initialize(originalBuffer.str());
+                rewriter.insert(declaration.sourceRange.getBegin(), proxyClassDeclaration(declaration) + std::string("\n\n"), true, true);
+
+                // add constructors with proxy class arguments
+                for (auto& definition : candidate->getDefinitions())
+                {
+                    std::stringstream usingProxy;
+                    usingProxy << "using " << definition.name << "_proxy = proxy_internal::" << definition.name << "_proxy";
+                    if (definition.isTemplatePartialSpecialization)
+                    {
+                        // HERE
+                        /*
+                        const clang::ClassTemplatePartialSpecializationDecl* tmpDecl = reinterpret_cast<const clang::ClassTemplatePartialSpecializationDecl*>(&definition.decl);
+                        std::cout << "TEST: " << dumpSourceRangeToString(, rewriter.getSourceMgr(), rewriter.getLangOpts());
+                        
+                        tmpDecl->getTemplateParameterList()->getSourceRange << std::endl;
+                        usingProxy << dumpSourceRangeToString(definition.templateParameterListSourceRange, rewriter.getSourceMgr(), rewriter.getLangOpts());
+                        */
+                    }
+                    std::cout << "USING: " << usingProxy.str() << std::endl;
+
+                    const std::string constructor = constructorClassFromProxyClass(definition);
+                    const clang::SourceLocation sourceLocation = (definition.hasCopyConstructor ? definition.copyConstructor->sourceRange 
+                                                                                                : definition.constructors.back().sourceRange).getEnd().getLocWithOffset(1);
+                    rewriter.insert(sourceLocation, std::string("\n") + constructor, true, true);
+                }
+
                 rewriteBuffer.write(llvm::outs());
-                */
             }
         }
     };
