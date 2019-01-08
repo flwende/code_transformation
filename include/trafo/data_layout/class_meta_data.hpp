@@ -175,11 +175,15 @@ namespace TRAFO_NAMESPACE
             class Declaration
             {
                 std::unique_ptr<const clang::CXXRecordDecl> cxxRecordDecl;
+                std::unique_ptr<const clang::ClassTemplateDecl> classTemplateDecl;
 
             public:
-            
-                clang::SourceRange sourceRange;
-                std::vector<Namespace> namespaces;
+        
+                const clang::SourceRange sourceRange;
+                std::unique_ptr<const clang::TemplateParameterList> templateParameterList;
+                const clang::SourceRange templateParameterListSourceRange;
+                const std::string name;
+                const std::vector<Namespace> namespaces;
                 const bool isDefinition;
                 const bool isStruct;
                 const bool isClass;
@@ -188,7 +192,11 @@ namespace TRAFO_NAMESPACE
                 Declaration(const T& decl, const bool isDefinition)
                     :
                     cxxRecordDecl(ClassDecl::getTemplatedDecl(decl)), // is never nullptr
+                    classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // might be nullptr
                     sourceRange(decl.getSourceRange()),
+                    templateParameterList(classTemplateDecl ? classTemplateDecl->getTemplateParameters() : nullptr),
+                    templateParameterListSourceRange(templateParameterList ? templateParameterList->getSourceRange() : clang::SourceRange()),
+                    name(decl.getNameAsString()),
                     namespaces(Namespace::getFromDecl(decl)),
                     isDefinition(isDefinition),
                     isStruct(cxxRecordDecl->isStruct()),
@@ -199,6 +207,10 @@ namespace TRAFO_NAMESPACE
                 {
                     std::cout << indent << "* DECLARATION:" << std::endl;
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
+                    if (templateParameterList.get())
+                    {
+                        std::cout << indent << "\t+-> template parameter list range: " << templateParameterListSourceRange.printToString(sm) << std::endl;
+                    }
                     std::cout << indent << "\t+-> namespace(s):" << std::endl;
                     for (auto& ns : namespaces)
                     {
@@ -237,6 +249,9 @@ namespace TRAFO_NAMESPACE
                 const Declaration& declaration;
                 const clang::CXXRecordDecl& decl;
                 const clang::SourceRange sourceRange;
+                std::unique_ptr<const clang::TemplateParameterList> templateParameterList;
+                const clang::SourceRange templateParameterListSourceRange;
+                const std::string name;
                 const bool isTemplatePartialSpecialization;
                 std::vector<Field> fields;
                 std::vector<std::unique_ptr<const Field>> ptrPublicFields;
@@ -250,15 +265,21 @@ namespace TRAFO_NAMESPACE
                 std::vector<std::unique_ptr<const Constructor>> ptrPublicConstructors;
                 std::vector<std::unique_ptr<const Constructor>> ptrProtectedConstructors;
                 std::vector<std::unique_ptr<const Constructor>> ptrPrivateConstructors;
+                bool hasCopyConstructor;
+                std::unique_ptr<const Constructor> copyConstructor;
                 bool isProxyClassCandidate;
 
                 Definition(const Declaration& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
                     :
                     classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
+                    templateParameterList(classTemplateDecl ? classTemplateDecl->getTemplateParameters() : nullptr),
+                    templateParameterListSourceRange(templateParameterList ? templateParameterList->getSourceRange() : clang::SourceRange()),
                     declaration(declaration),
                     decl(decl),
                     sourceRange(classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()),
+                    name(decl.getNameAsString()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
+                    hasCopyConstructor(false),
                     isProxyClassCandidate(true)
                 {
                     using namespace clang::ast_matchers;
@@ -311,6 +332,7 @@ namespace TRAFO_NAMESPACE
                             { \
                                 constructors.emplace_back(*decl, AccessSpecifier::Type::ACCESS); \
                                 ptr ## ACCESS ## Constructors.emplace_back(&constructors.back()); \
+                                hasCopyConstructor |= constructors.back().isCopyConstructor; \
                             } \
                         }, &decl)
 
@@ -321,25 +343,42 @@ namespace TRAFO_NAMESPACE
                     
                     matcher.run(decl.getASTContext());
 
-                    // set up access pointer
-                    for (auto& access : accessSpecifiers)
-                    {
-                        if (ptrPublicAccess == nullptr && access.type == AccessSpecifier::Type::Public)
-                        {
-                            ptrPublicAccess = std::unique_ptr<AccessSpecifier>(&access);
-                        }
-                        else if (ptrProtectedAccess == nullptr && access.type == AccessSpecifier::Type::Protected)
-                        {
-                            ptrProtectedAccess = std::unique_ptr<AccessSpecifier>(&access);
-                        }
-                        else if (ptrPrivateAccess == nullptr && access.type == AccessSpecifier::Type::Private)
-                        {
-                            ptrPrivateAccess = std::unique_ptr<AccessSpecifier>(&access);
-                        }
-                    }
-
                     // proxy class candidate?
                     testIfProxyClassIsCandidate();
+
+                    // do this only if is is a proxy class candidate
+                    if (isProxyClassCandidate)
+                    {
+                        // set up access pointer
+                        for (auto& access : accessSpecifiers)
+                        {
+                            if (ptrPublicAccess == nullptr && access.type == AccessSpecifier::Type::Public)
+                            {
+                                ptrPublicAccess = std::unique_ptr<AccessSpecifier>(&access);
+                            }
+                            else if (ptrProtectedAccess == nullptr && access.type == AccessSpecifier::Type::Protected)
+                            {
+                                ptrProtectedAccess = std::unique_ptr<AccessSpecifier>(&access);
+                            }
+                            else if (ptrPrivateAccess == nullptr && access.type == AccessSpecifier::Type::Private)
+                            {
+                                ptrPrivateAccess = std::unique_ptr<AccessSpecifier>(&access);
+                            }
+                        }
+
+                        // find copy constructor if there is any
+                        if (hasCopyConstructor)
+                        {
+                            for (auto& constructor : constructors)
+                            {
+                                if (constructor.isCopyConstructor)
+                                {
+                                    copyConstructor = std::unique_ptr<const Constructor>(&constructor);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 void printInfo(clang::SourceManager& sm, const std::string indent = "") const
@@ -381,6 +420,8 @@ namespace TRAFO_NAMESPACE
             virtual bool isTemplated() const = 0;
 
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false) = 0;
+
+            virtual const Declaration& getDeclaration() const = 0;
 
             virtual const std::vector<Definition>& getDefinitions() const = 0;
 
@@ -432,6 +473,11 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates |= definitions.back().isProxyClassCandidate;
 
                 return true;
+            }
+
+            virtual const Declaration& getDeclaration() const
+            {
+                return declaration;
             }
 
             virtual const std::vector<Base::Definition>& getDefinitions() const
@@ -495,6 +541,11 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates |= definitions.back().isProxyClassCandidate;
 
                 return true;
+            }
+
+            virtual const Declaration& getDeclaration() const
+            {
+                return declaration;
             }
 
             virtual const std::vector<Base::Definition>& getDefinitions() const
