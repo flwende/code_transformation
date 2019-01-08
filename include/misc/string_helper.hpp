@@ -71,6 +71,12 @@ namespace TRAFO_NAMESPACE
             return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
         }
 
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, clang::SourceManager& sm, const clang::LangOptions& langOpts)
+        {
+            const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sm, langOpts);
+            return sourceText.str();
+        }
+
         static std::vector<std::string> splitString(const std::string str, const char delimiter)
         {
             std::vector<std::string> output;
