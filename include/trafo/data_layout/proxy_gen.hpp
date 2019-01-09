@@ -7,10 +7,9 @@
 #define TRAFO_DATA_LAYOUT_PROXY_GEN_HPP
 
 #include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
 #include <cstdint>
+#include <memory>
+#include <vector>
 #include <set>
 
 #include <clang/AST/AST.h>
@@ -450,7 +449,7 @@ namespace TRAFO_NAMESPACE
             for (auto& candidate : proxyClassCandidates)
             {
                 if (!candidate->containsProxyClassCandidates) continue;
-            
+        
                 std::cout << "############################################################################################################################" << std::endl;
                 std::cout << "### CANDIDATE: ";
                 candidate->printInfo();
@@ -461,14 +460,16 @@ namespace TRAFO_NAMESPACE
                 std::string originalBufferStr;
                 llvm::raw_string_ostream originalBuffer(originalBufferStr);
                 rewriteBuffer.write(originalBuffer);
-/*
+
+                /*
                 // iterate over candidate definitions: 
                 for (auto& definition : candidate->getDefinitions())
                 {
                     rewriter.insert(definition.sourceRange.getBegin(), "TRANSFORM INTO PROXY\n", true, true);            
                     rewriteBuffer.write(llvm::outs());
                 }
-*/              
+                */
+
                 // insert proxy class forward declaration
                 const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
                 rewriteBuffer.Initialize(originalBuffer.str());
@@ -481,14 +482,11 @@ namespace TRAFO_NAMESPACE
                     usingProxy << "using " << definition.name << "_proxy = proxy_internal::" << definition.name << "_proxy";
                     if (definition.isTemplatePartialSpecialization)
                     {
-                        // HERE
-                        /*
-                        const clang::ClassTemplatePartialSpecializationDecl* tmpDecl = reinterpret_cast<const clang::ClassTemplatePartialSpecializationDecl*>(&definition.decl);
-                        std::cout << "TEST: " << dumpSourceRangeToString(, rewriter.getSourceMgr(), rewriter.getLangOpts());
-                        
-                        tmpDecl->getTemplateParameterList()->getSourceRange << std::endl;
-                        usingProxy << dumpSourceRangeToString(definition.templateParameterListSourceRange, rewriter.getSourceMgr(), rewriter.getLangOpts());
-                        */
+                        usingProxy << "<" << concat(definition.templatePartialSpecializationArguments, std::string(", ")) << ">";
+                    }
+                    else if (candidate->isTemplated())
+                    {
+                        usingProxy << "<" << concat(definition.declaration.getTemplateParameterNames(), std::string(", ")) << ">";
                     }
                     std::cout << "USING: " << usingProxy.str() << std::endl;
 

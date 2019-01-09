@@ -137,10 +137,10 @@ namespace TRAFO_NAMESPACE
                 const std::string typeName;
                 const bool isTypeParameter;
 
-                TemplateParameter(const clang::NamedDecl& decl, const clang::SourceRange sourceRange, const std::string typeName)
+                TemplateParameter(const clang::NamedDecl& decl, const std::string typeName)
                     :
                     decl(decl),
-                    sourceRange(sourceRange),
+                    sourceRange(decl.getSourceRange()),
                     name(decl.getNameAsString()),
                     typeName(typeName),
                     isTypeParameter(typeName == std::string("typename") || typeName == std::string("class"))
@@ -154,7 +154,7 @@ namespace TRAFO_NAMESPACE
 
                     if (const clang::TemplateParameterList* parameterList = decl->getTemplateParameters())
                     {
-                        sourceRange = clang::SourceRange(parameterList->getLAngleLoc(), parameterList->getRAngleLoc().getLocWithOffset(1));
+                        sourceRange = parameterList->getSourceRange();
                     }
 
                     return sourceRange;
@@ -172,10 +172,7 @@ namespace TRAFO_NAMESPACE
                         for (std::size_t i = 0; i < numParameters; ++i)
                         {
                             const clang::NamedDecl& decl = *(parameterList->getParam(i));
-                            const clang::SourceRange sourceRangeExclusive = clang::SourceRange(decl.getBeginLoc(), decl.getEndLoc().getLocWithOffset(-1));
-                            const clang::SourceRange sourceRangeInclusive = clang::SourceRange(decl.getBeginLoc(), decl.getEndLoc().getLocWithOffset(1));
-                            const std::string typeName = dumpSourceRangeToString(sourceRangeExclusive, sm);
-                            templateParameters.emplace_back(decl, sourceRangeInclusive, typeName);
+                            templateParameters.emplace_back(decl, removeSpaces(dumpSourceRangeToString(decl.getSourceRange(), sm)));
                         }
                     }
 
@@ -320,6 +317,16 @@ namespace TRAFO_NAMESPACE
                 clang::SourceManager& getSourceMgr() const
                 {
                     return sourceManager;
+                }
+
+                std::vector<std::string> getTemplateParameterNames() const
+                {
+                    std::vector<std::string> templateParameterNames;
+                    for (auto parameter : templateParameters)
+                    {
+                        templateParameterNames.push_back(parameter.name);
+                    }
+                    return templateParameterNames;
                 }
 
                 void printInfo(const std::string indent = "") const

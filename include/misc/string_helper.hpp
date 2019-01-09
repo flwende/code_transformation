@@ -8,7 +8,9 @@
 
 #include <sstream>
 #include <string>
+#include <cctype>
 #include <vector>
+#include <algorithm>
 #include <clang/AST/AST.h>
 
 #if !defined(TRAFO_NAMESPACE)
@@ -83,20 +85,37 @@ namespace TRAFO_NAMESPACE
             return dumpSourceRangeToString(sourceRange, sm, langOpts);
         }
 
-        static std::vector<std::string> splitString(const std::string str, const char delimiter)
+        static std::vector<std::string> splitString(const std::string& input, const char delimiter)
         {
             std::vector<std::string> output;
             std::string tmp;
-            std::istringstream input(str);
-
-            while (std::getline(input, tmp, delimiter))
+            std::istringstream inputStream(input);
+            while (std::getline(inputStream, tmp, delimiter))
             {
                 if (tmp != "")
                 {
                     output.push_back(tmp);
                 }
             }
+            return output;
+        }
 
+        static std::string removeSpaces(const std::string& str)
+        {
+            std::string output(str);
+            output.erase(std::remove_if(output.begin(), output.end(), ::isspace), output.end());
+            return output;
+        }
+
+        static std::string concat(const std::vector<std::string>& input, const std::string delimiter = "")
+        {
+            std::string output;
+            const std::uint32_t numElements = input.size();
+            std::uint32_t elementId = 0;
+            for (auto element : input)
+            {
+                output += element + (++elementId < numElements ? delimiter : std::string(""));
+            }
             return output;
         }
     }
