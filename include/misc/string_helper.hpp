@@ -77,6 +77,12 @@ namespace TRAFO_NAMESPACE
             return sourceText.str();
         }
 
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, clang::SourceManager& sm)
+        {
+            const clang::LangOptions langOpts;
+            return dumpSourceRangeToString(sourceRange, sm, langOpts);
+        }
+
         static std::vector<std::string> splitString(const std::string str, const char delimiter)
         {
             std::vector<std::string> output;
