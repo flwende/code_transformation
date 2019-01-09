@@ -322,7 +322,7 @@ namespace TRAFO_NAMESPACE
                 std::vector<std::string> getTemplateParameterNames() const
                 {
                     std::vector<std::string> templateParameterNames;
-                    for (auto parameter : templateParameters)
+                    for (auto& parameter : templateParameters)
                     {
                         templateParameterNames.push_back(parameter.name);
                     }
@@ -336,9 +336,9 @@ namespace TRAFO_NAMESPACE
                     if (namespaces.size() > 0)
                     {
                         std::cout << indent << "\t+-> namespace(s):" << std::endl;
-                        for (auto& ns : namespaces)
+                        for (auto& thisNamespace : namespaces)
                         {
-                            ns.printInfo(sourceManager, indent + "\t|\t");
+                            thisNamespace.printInfo(sourceManager, indent + "\t|\t");
                         }
                     }
                     if (templateParameters.size() > 0)
@@ -521,7 +521,6 @@ namespace TRAFO_NAMESPACE
                 void printInfo(const std::string indent = "") const
                 {
                     std::cout << indent << "* DEFINITION:" << std::endl;
-                    std::cout << indent << "\t+-> proxy class candidate: " << (isProxyClassCandidate ? "yes" : "no") << std::endl;
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> declaration: " << declaration.sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> is template (partial) specialization: " << (isTemplatePartialSpecialization ? "yes" : "no") << std::endl;

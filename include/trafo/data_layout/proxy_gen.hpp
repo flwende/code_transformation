@@ -348,7 +348,7 @@ namespace TRAFO_NAMESPACE
             std::vector<std::string> containerNames;
             containerNames.push_back("vector");
 
-            for (auto& containerName : containerNames)
+            for (auto containerName : containerNames)
             {
                 matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
                     [&] (const MatchFinder::MatchResult& result) mutable
@@ -369,7 +369,7 @@ namespace TRAFO_NAMESPACE
 
             // step 2: check if element data type is candidate for proxy class generation
             clang::SourceManager& sm = rewriter.getSourceMgr();
-            for (auto& className : proxyClassCandidateNames)
+            for (auto className : proxyClassCandidateNames)
             {
                 // template class declarations
                 matcher.addMatcher(classTemplateDecl(hasName(className)).bind("classTemplateDeclaration"),
