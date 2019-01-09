@@ -17,8 +17,8 @@ static std::vector<float> f;
 int main(int argc, char** argv)
 {
     std::size_t n = (argc > 1 ? atoi(argv[1]) : 16);
-    std::vector<fw::A<real_t, 3>> x(n);
-    std::vector<std::vector<fw::A<real_t, 3>>> y(1);
+    std::vector<fw::A<real_t, 3, float>> x(n);
+    std::vector<std::vector<fw::A<real_t, 3, float>>> y(1);
     std::vector<fw::extra::B<real_t>> ps(n);
     y[0].resize(n);
 

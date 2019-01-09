@@ -7,8 +7,6 @@
 #define TRAFO_DATA_LAYOUT_CLASS_META_DATA_HPP
 
 #include <iostream>
-#include <memory>
-#include <string>
 #include <vector>
 #include <cstdint>
 #include <misc/ast_helper.hpp>
@@ -62,7 +60,7 @@ namespace TRAFO_NAMESPACE
                 const clang::FieldDecl& decl;
                 const clang::SourceRange sourceRange;
                 const std::string name;
-                std::unique_ptr<const clang::Type> type;
+                const clang::Type* type;
                 const std::string typeName;
                 const AccessSpecifier::Type access;
                 const bool isPublic;
@@ -129,6 +127,105 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
+            class TemplateParameter
+            {
+            public:
+
+                const clang::NamedDecl& decl;
+                const clang::SourceRange sourceRange;
+                const std::string name;
+                const std::string typeName;
+                const bool isTypeParameter;
+
+                TemplateParameter(const clang::NamedDecl& decl, const clang::SourceRange sourceRange, const std::string typeName)
+                    :
+                    decl(decl),
+                    sourceRange(sourceRange),
+                    name(decl.getNameAsString()),
+                    typeName(typeName),
+                    isTypeParameter(typeName == std::string("typename") || typeName == std::string("class"))
+                { ; }
+
+                static clang::SourceRange getParameterListSourceRange(const clang::ClassTemplateDecl* decl)
+                {
+                    clang::SourceRange sourceRange;
+
+                    if (decl == nullptr) return sourceRange;
+
+                    if (const clang::TemplateParameterList* parameterList = decl->getTemplateParameters())
+                    {
+                        sourceRange = clang::SourceRange(parameterList->getLAngleLoc(), parameterList->getRAngleLoc().getLocWithOffset(1));
+                    }
+
+                    return sourceRange;
+                }
+
+                static std::vector<TemplateParameter> getParametersFromDecl(const clang::ClassTemplateDecl* decl, clang::SourceManager& sm)
+                {
+                    std::vector<TemplateParameter> templateParameters;
+
+                    if (decl == nullptr) return templateParameters;
+
+                    if (const clang::TemplateParameterList* parameterList = decl->getTemplateParameters())
+                    {
+                        const std::size_t numParameters = parameterList->size();
+                        for (std::size_t i = 0; i < numParameters; ++i)
+                        {
+                            const clang::NamedDecl& decl = *(parameterList->getParam(i));
+                            const clang::SourceRange sourceRangeExclusive = clang::SourceRange(decl.getBeginLoc(), decl.getEndLoc().getLocWithOffset(-1));
+                            const clang::SourceRange sourceRangeInclusive = clang::SourceRange(decl.getBeginLoc(), decl.getEndLoc().getLocWithOffset(1));
+                            const std::string typeName = dumpSourceRangeToString(sourceRangeExclusive, sm);
+                            templateParameters.emplace_back(decl, sourceRangeInclusive, typeName);
+                        }
+                    }
+
+                    return templateParameters;
+                }
+
+                static std::vector<std::string> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, clang::SourceManager& sm, const std::vector<const TemplateParameter*>& typeParameters)
+                {
+                    std::vector<std::string> argNames;
+                    
+                    if (const clang::ClassTemplatePartialSpecializationDecl* tpsDecl = reinterpret_cast<const clang::ClassTemplatePartialSpecializationDecl*>(&decl))
+                    {
+                        const clang::TemplateArgumentList& args = tpsDecl->getTemplateArgs();
+                        for (std::size_t i = 0, iMax = args.size(); i < iMax; ++i)
+                        {
+                            std::string argName("\"TemplateParameter::getPartialSpecializationArguments() needs to be extended\"");
+                            
+                            if (args[i].getKind() == clang::TemplateArgument::ArgKind::Type)
+                            {
+                                const clang::QualType argQualType = args[i].getAsType();
+                                const clang::Type* argType = argQualType.getTypePtrOrNull();
+                                argName = argQualType.getAsString();
+                                if (argType != nullptr && argType->isTemplateTypeParmType())
+                                {
+                                    const std::uint32_t argNameTypeId = std::atoi(argName.substr(argName.rfind('-') + 1).c_str());
+                                    if (argNameTypeId < typeParameters.size())
+                                    {
+                                        argName = typeParameters[argNameTypeId]->name;
+                                    }
+                                }
+                            }
+                            else if (args[i].getKind() == clang::TemplateArgument::ArgKind::Integral)
+                            {
+                                argName = std::to_string(args[i].getAsIntegral().getExtValue());
+                            }
+                            
+                            argNames.push_back(argName);
+                        }   
+                    }
+
+                    return argNames;
+                }
+
+                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                {
+                    std::cout << indent << "* name=" << name << ", " << (isTypeParameter ? "typename" : "value : ") << (isTypeParameter ? "" : typeName) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
+                }
+            };
+
             class Namespace
             {
             public:
@@ -174,47 +271,76 @@ namespace TRAFO_NAMESPACE
 
             class Declaration
             {
-                std::unique_ptr<const clang::CXXRecordDecl> cxxRecordDecl;
-                std::unique_ptr<const clang::ClassTemplateDecl> classTemplateDecl;
+                clang::SourceManager& sourceManager;
+                const clang::CXXRecordDecl* cxxRecordDecl;
+                const clang::ClassTemplateDecl* classTemplateDecl;
+
+                std::vector<const TemplateParameter*> getTemplateTypeParameters() const
+                {
+                    std::vector<const TemplateParameter*> templateTypeParameters;
+                    for (auto& parameter : templateParameters)
+                    {
+                        if (parameter.isTypeParameter)
+                        {
+                            templateTypeParameters.push_back(&parameter);
+                        }
+                    }
+                    return templateTypeParameters;
+                }
 
             public:
         
                 const clang::SourceRange sourceRange;
-                std::unique_ptr<const clang::TemplateParameterList> templateParameterList;
-                const clang::SourceRange templateParameterListSourceRange;
                 const std::string name;
                 const std::vector<Namespace> namespaces;
+                const std::vector<TemplateParameter> templateParameters;
+                const std::vector<const TemplateParameter*> templateTypeParameters;
+                const clang::SourceRange templateParameterListSourceRange;
                 const bool isDefinition;
                 const bool isStruct;
                 const bool isClass;
 
                 template <typename T>
-                Declaration(const T& decl, const bool isDefinition)
+                Declaration(const T& decl, const bool isDefinition, clang::SourceManager& sourceManager)
                     :
+                    sourceManager(sourceManager),
                     cxxRecordDecl(ClassDecl::getTemplatedDecl(decl)), // is never nullptr
-                    classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // might be nullptr
+                    classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
                     sourceRange(decl.getSourceRange()),
-                    templateParameterList(classTemplateDecl ? classTemplateDecl->getTemplateParameters() : nullptr),
-                    templateParameterListSourceRange(templateParameterList ? templateParameterList->getSourceRange() : clang::SourceRange()),
                     name(decl.getNameAsString()),
                     namespaces(Namespace::getFromDecl(decl)),
+                    templateParameters(TemplateParameter::getParametersFromDecl(classTemplateDecl, sourceManager)),
+                    templateTypeParameters(getTemplateTypeParameters()),
+                    templateParameterListSourceRange(TemplateParameter::getParameterListSourceRange(classTemplateDecl)),
                     isDefinition(isDefinition),
                     isStruct(cxxRecordDecl->isStruct()),
                     isClass(cxxRecordDecl->isClass())
                 { ; }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                clang::SourceManager& getSourceMgr() const
+                {
+                    return sourceManager;
+                }
+
+                void printInfo(const std::string indent = "") const
                 {
                     std::cout << indent << "* DECLARATION:" << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
-                    if (templateParameterList.get())
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    if (namespaces.size() > 0)
                     {
-                        std::cout << indent << "\t+-> template parameter list range: " << templateParameterListSourceRange.printToString(sm) << std::endl;
+                        std::cout << indent << "\t+-> namespace(s):" << std::endl;
+                        for (auto& ns : namespaces)
+                        {
+                            ns.printInfo(sourceManager, indent + "\t|\t");
+                        }
                     }
-                    std::cout << indent << "\t+-> namespace(s):" << std::endl;
-                    for (auto& ns : namespaces)
+                    if (templateParameters.size() > 0)
                     {
-                        ns.printInfo(sm, indent + "\t|\t");
+                        std::cout << indent << "\t+-> template parameter list range: " << templateParameterListSourceRange.printToString(sourceManager) << std::endl;
+                        for (auto& parameter : templateParameters)
+                        {
+                            parameter.printInfo(sourceManager, indent + "\t|\t");
+                        }
                     }
                     std::cout << indent << "\t+-> is definition: " << (isDefinition ? "yes" : "no") << std::endl;
                 }
@@ -242,43 +368,47 @@ namespace TRAFO_NAMESPACE
                     isProxyClassCandidate &= !(hasMultiplePublicFieldTypes || hasNonFundamentalPublicFields);
                 }
 
-                std::unique_ptr<const clang::ClassTemplateDecl> classTemplateDecl;
+                clang::SourceManager& sourceManager;
+                const clang::ClassTemplateDecl* classTemplateDecl;
 
             public:
             
+                
                 const Declaration& declaration;
                 const clang::CXXRecordDecl& decl;
                 const clang::SourceRange sourceRange;
-                std::unique_ptr<const clang::TemplateParameterList> templateParameterList;
-                const clang::SourceRange templateParameterListSourceRange;
-                const std::string name;
+                const std::string name;                
                 const bool isTemplatePartialSpecialization;
+                const std::vector<std::string> templatePartialSpecializationArguments;            
                 std::vector<Field> fields;
-                std::vector<std::unique_ptr<const Field>> ptrPublicFields;
-                std::vector<std::unique_ptr<const Field>> ptrProtectedFields;
-                std::vector<std::unique_ptr<const Field>> ptrPrivateFields;
+                std::vector<const Field*> ptrPublicFields;
+                std::vector<const Field*> ptrProtectedFields;
+                std::vector<const Field*> ptrPrivateFields;
                 std::vector<AccessSpecifier> accessSpecifiers;
-                std::unique_ptr<const AccessSpecifier> ptrPublicAccess;
-                std::unique_ptr<const AccessSpecifier> ptrProtectedAccess;
-                std::unique_ptr<const AccessSpecifier> ptrPrivateAccess;
+                const AccessSpecifier* publicAccess;
+                const AccessSpecifier* protectedAccess;
+                const AccessSpecifier* privateAccess;
                 std::vector<Constructor> constructors;
-                std::vector<std::unique_ptr<const Constructor>> ptrPublicConstructors;
-                std::vector<std::unique_ptr<const Constructor>> ptrProtectedConstructors;
-                std::vector<std::unique_ptr<const Constructor>> ptrPrivateConstructors;
+                std::vector<const Constructor*> ptrPublicConstructors;
+                std::vector<const Constructor*> ptrProtectedConstructors;
+                std::vector<const Constructor*> ptrPrivateConstructors;
                 bool hasCopyConstructor;
-                std::unique_ptr<const Constructor> copyConstructor;
+                const Constructor* copyConstructor;
                 bool isProxyClassCandidate;
 
                 Definition(const Declaration& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
                     :
+                    sourceManager(declaration.getSourceMgr()),
                     classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
-                    templateParameterList(classTemplateDecl ? classTemplateDecl->getTemplateParameters() : nullptr),
-                    templateParameterListSourceRange(templateParameterList ? templateParameterList->getSourceRange() : clang::SourceRange()),
                     declaration(declaration),
                     decl(decl),
                     sourceRange(classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()),
                     name(decl.getNameAsString()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
+                    templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, sourceManager, declaration.templateTypeParameters) : std::vector<std::string>()),
+                    publicAccess(nullptr),
+                    protectedAccess(nullptr),
+                    privateAccess(nullptr),
                     hasCopyConstructor(false),
                     isProxyClassCandidate(true)
                 {
@@ -352,17 +482,17 @@ namespace TRAFO_NAMESPACE
                         // set up access pointer
                         for (auto& access : accessSpecifiers)
                         {
-                            if (ptrPublicAccess == nullptr && access.type == AccessSpecifier::Type::Public)
+                            if (publicAccess == nullptr && access.type == AccessSpecifier::Type::Public)
                             {
-                                ptrPublicAccess = std::unique_ptr<AccessSpecifier>(&access);
+                                publicAccess = &access;
                             }
-                            else if (ptrProtectedAccess == nullptr && access.type == AccessSpecifier::Type::Protected)
+                            else if (protectedAccess == nullptr && access.type == AccessSpecifier::Type::Protected)
                             {
-                                ptrProtectedAccess = std::unique_ptr<AccessSpecifier>(&access);
+                                protectedAccess = &access;
                             }
-                            else if (ptrPrivateAccess == nullptr && access.type == AccessSpecifier::Type::Private)
+                            else if (privateAccess == nullptr && access.type == AccessSpecifier::Type::Private)
                             {
-                                ptrPrivateAccess = std::unique_ptr<AccessSpecifier>(&access);
+                                privateAccess = &access;
                             }
                         }
 
@@ -373,7 +503,7 @@ namespace TRAFO_NAMESPACE
                             {
                                 if (constructor.isCopyConstructor)
                                 {
-                                    copyConstructor = std::unique_ptr<const Constructor>(&constructor);
+                                    copyConstructor = &constructor;
                                     break;
                                 }
                             }
@@ -381,38 +511,54 @@ namespace TRAFO_NAMESPACE
                     }
                 }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const std::string indent = "") const
                 {
                     std::cout << indent << "* DEFINITION:" << std::endl;
                     std::cout << indent << "\t+-> proxy class candidate: " << (isProxyClassCandidate ? "yes" : "no") << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
-                    std::cout << indent << "\t+-> declaration: " << declaration.sourceRange.printToString(sm) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    std::cout << indent << "\t+-> declaration: " << declaration.sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> is template (partial) specialization: " << (isTemplatePartialSpecialization ? "yes" : "no") << std::endl;
-                    std::cout << indent << "\t+-> fields: (public/protected/private)=(" << ptrPublicFields.size() << "/" << ptrProtectedFields.size() << "/" << ptrPrivateFields.size() << ")" << std::endl;
-                    for (auto& field : fields)
+                    if (isTemplatePartialSpecialization)
                     {
-                        field.printInfo(sm, indent + "\t|\t");
+                        std::cout << indent << "\t|\t* arguments: <";
+                        const std::uint32_t numArgument = templatePartialSpecializationArguments.size();
+                        std::uint32_t argumentId = 0;
+                        for (auto argument : templatePartialSpecializationArguments)
+                        {
+                            std::cout << argument << (++argumentId < numArgument ? ", " : ">");
+                        }
+                        std::cout << std::endl;
                     }
                     std::cout << indent << "\t+-> access specifier:" << std::endl;
                     for (auto& specifier : accessSpecifiers)
                     {
-                        specifier.printInfo(sm, indent + "\t|\t");
+                        specifier.printInfo(sourceManager, indent + "\t|\t");
                     }
                     std::cout << indent << "\t+-> constructor:" << std::endl;
                     for (auto& constructor : constructors)
                     {
-                        constructor.printInfo(sm, indent + "\t\t");
+                        constructor.printInfo(sourceManager, indent + "\t|\t");
+                    }
+                    std::cout << indent << "\t+-> fields: (public/protected/private)=(" << ptrPublicFields.size() << "/" << ptrProtectedFields.size() << "/" << ptrPrivateFields.size() << ")" << std::endl;
+                    for (auto& field : fields)
+                    {
+                        field.printInfo(sourceManager, indent + "\t\t");
                     }
                 }
             };
+
+        protected:
+
+            clang::SourceManager& sourceManager;
 
         public:
 
             const std::string name;
             bool containsProxyClassCandidates;
             
-            ClassMetaData(const std::string name)
+            ClassMetaData(const std::string name, clang::SourceManager& sourceManager)
                 :
+                sourceManager(sourceManager),                
                 name(name),
                 containsProxyClassCandidates(false)
             { ; }
@@ -427,7 +573,7 @@ namespace TRAFO_NAMESPACE
 
             virtual const clang::SourceLocation getSourceLocation() const = 0;
 
-            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const = 0;
+            virtual void printInfo(const std::string indent = "") const = 0;
         };
 
         class CXXClassMetaData : public ClassMetaData
@@ -439,10 +585,10 @@ namespace TRAFO_NAMESPACE
 
         public:
 
-            CXXClassMetaData(const clang::CXXRecordDecl& decl, const bool isDefinition)
+            CXXClassMetaData(const clang::CXXRecordDecl& decl, const bool isDefinition, clang::SourceManager& sourceManager)
                 :
-                Base(decl.getNameAsString()),
-                declaration(decl, isDefinition)
+                Base(decl.getNameAsString(), sourceManager),
+                declaration(decl, isDefinition, sourceManager)
             {
                 ;
             }
@@ -490,13 +636,13 @@ namespace TRAFO_NAMESPACE
                 return declaration.sourceRange.getBegin();
             }
 
-            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+            virtual void printInfo(const std::string indent = "") const
             {
                 std::cout << indent << "C++ " << (declaration.isClass ? "class: " : "struct: ") << name << std::endl;
-                declaration.printInfo(sm, indent + "\t");
+                declaration.printInfo(indent + "\t");
                 for (auto& definition : definitions)
                 {
-                    definition.printInfo(sm, indent + "\t");
+                    definition.printInfo(indent + "\t");
                 }
             }
         };
@@ -510,10 +656,10 @@ namespace TRAFO_NAMESPACE
 
         public:
 
-            TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
+            TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition, clang::SourceManager& sourceManager)
                 :
-                Base(decl.getNameAsString()),
-                declaration(decl, isDefinition)
+                Base(decl.getNameAsString(), sourceManager),
+                declaration(decl, isDefinition, sourceManager)
             {
                 ;
             }
@@ -558,13 +704,13 @@ namespace TRAFO_NAMESPACE
                 return declaration.sourceRange.getBegin();
             }
 
-            virtual void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+            virtual void printInfo(const std::string indent = "") const
             {
                 std::cout << indent << "C++ template " << (declaration.isClass ? "class: " : "struct: ") << name << std::endl;
-                declaration.printInfo(sm, indent + "\t");
+                declaration.printInfo(indent + "\t");
                 for (auto& definition : definitions)
                 {
-                    definition.printInfo(sm, indent + "\t");
+                    definition.printInfo(indent + "\t");
                 }
             }
         };

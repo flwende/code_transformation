@@ -369,6 +369,7 @@ namespace TRAFO_NAMESPACE
             matcher.clear();
 
             // step 2: check if element data type is candidate for proxy class generation
+            clang::SourceManager& sm = rewriter.getSourceMgr();
             for (auto& className : proxyClassCandidateNames)
             {
                 // template class declarations
@@ -378,7 +379,7 @@ namespace TRAFO_NAMESPACE
                         if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDeclaration"))
                         {
                             if (decl->isThisDeclarationADefinition()) return;
-                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, false));
+                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, false, sm));
                         }
                     });
                 
@@ -396,7 +397,7 @@ namespace TRAFO_NAMESPACE
                             }
                                        
                             // not found
-                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, true));
+                            proxyClassCandidates.emplace_back(new TemplateClassMetaData(*decl, true, sm));
                             proxyClassCandidates.back()->addDefinition(*(decl->getTemplatedDecl()));
                         }
                     });
@@ -434,7 +435,7 @@ namespace TRAFO_NAMESPACE
                                 }
                             }
                             
-                            proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, isDefinition));
+                            proxyClassCandidates.emplace_back(new CXXClassMetaData(*decl, isDefinition, sm));
                             if (isDefinition)
                             {
                                 proxyClassCandidates.back()->addDefinition(*decl, false);
@@ -452,7 +453,7 @@ namespace TRAFO_NAMESPACE
             
                 std::cout << "############################################################################################################################" << std::endl;
                 std::cout << "### CANDIDATE: ";
-                candidate->printInfo(rewriter.getSourceMgr());
+                candidate->printInfo();
                 std::cout << "############################################################################################################################" << std::endl;
 
                 // backup the original buffer content

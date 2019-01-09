@@ -11,6 +11,8 @@
 
 namespace fw
 {
+    struct C;
+
     struct C
     {
     private:

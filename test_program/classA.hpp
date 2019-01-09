@@ -13,11 +13,11 @@ using real_t = float;
 
 namespace fw
 {
-    template <typename T, std::size_t D>
+    template <typename T, std::size_t D, typename TT>
     class A;
 
-    template <typename T>
-    class A<T, 2>
+    template <typename T, typename TT>
+    class A<T, 2, TT>
     {
         static constexpr std::size_t D = 2;
         using fundamental_type = T;
@@ -37,8 +37,8 @@ namespace fw
         T y;
     };
 
-    template <typename T>
-    class A<T, 3>
+    template <typename T, typename TT>
+    class A<T, 3, TT>
     {
         static constexpr std::size_t D = 3;
         using fundamental_type = T;
@@ -60,8 +60,8 @@ namespace fw
         T z;
     };
 
-    template <typename T>
-    static std::ostream& operator<<(std::ostream& os, const A<T, 3>& a)
+    template <typename T, typename TT>
+    static std::ostream& operator<<(std::ostream& os, const A<T, 3, TT>& a)
     {
         os << "(" << a.x << "," << a.y << "," << a.z << ")";
         return os;

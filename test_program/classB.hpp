@@ -34,7 +34,7 @@ namespace fw
         protected:
             float x;
         public:
-            float w;
+            T w;
         };
 
         template <typename T>
