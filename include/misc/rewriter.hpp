@@ -43,7 +43,7 @@ namespace TRAFO_NAMESPACE
 
         std::unique_ptr<clang::ast_matchers::MatchFinder> matcher;   
         std::vector<std::unique_ptr<Action>> actions;
-        clang::Rewriter& rewriter;
+        clang::Rewriter rewriter;
         
     public:
 
@@ -51,6 +51,12 @@ namespace TRAFO_NAMESPACE
             :
             matcher(nullptr),
             rewriter(rewriter)
+        { ; }
+
+        Rewriter(const Rewriter& other)
+            :
+            matcher(nullptr),
+            rewriter(other.rewriter)
         { ; }
 
         clang::SourceManager& getSourceMgr() const
@@ -77,17 +83,28 @@ namespace TRAFO_NAMESPACE
         {
             return rewriter.ReplaceText(sourceRange, text);
         }
+
+        bool remove(const clang::SourceRange& sourceRange)
+        {
+            return rewriter.RemoveText(sourceRange);
+        }
         
-        bool InsertText(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
+        bool InsertText(const clang::SourceLocation sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
         {
             // compatibility with clang::Rewriter interface 
             return insert(sourceLocation, text, insertAfter, indentNewLines);
         }
 
-        bool ReplaceText(const clang::SourceRange& sourceRange, const std::string& text)
+        bool ReplaceText(const clang::SourceRange sourceRange, const std::string& text)
         {
             // compatibility with clang::Rewriter interface
             return replace(sourceRange, text);
+        }
+
+        bool RemoveText(const clang::SourceRange sourceRange)
+        {
+            // compatibility with clang::Rewriter interface
+            return remove(sourceRange);
         }
 
         template <typename T>

@@ -99,7 +99,6 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceRange sourceRange;
                 const bool isDefaultConstructor;
                 const bool isCopyConstructor;
-                const bool hasBody;
                 const AccessSpecifier::Type access;
                 const bool isPublic;
                 const bool isProtected;
@@ -111,7 +110,6 @@ namespace TRAFO_NAMESPACE
                     sourceRange(decl.getSourceRange()),
                     isDefaultConstructor(decl.isDefaultConstructor()),
                     isCopyConstructor(decl.isCopyConstructor()),
-                    hasBody(decl.hasBody()),
                     access(access),
                     isPublic(access == AccessSpecifier::Type::Public),
                     isProtected(access == AccessSpecifier::Type::Protected),
@@ -123,7 +121,7 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "* " << (isDefaultConstructor ? "default " : (isCopyConstructor ? "copy " : "")) << "constructor" << std::endl;
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
                     std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
-                    std::cout << indent << "\t+-> has body: " << (hasBody ? "yes" : "no") << std::endl;
+                    std::cout << indent << "\t+-> has body: " << (decl.hasBody() ? "yes" : "no") << std::endl;
                 }
             };
 
@@ -314,9 +312,15 @@ namespace TRAFO_NAMESPACE
                     isClass(cxxRecordDecl->isClass())
                 { ; }
 
+                clang::ASTContext& getASTContext() const
+                {
+                    return cxxRecordDecl->getASTContext();
+                }
+
                 clang::SourceManager& getSourceMgr() const
                 {
-                    return sourceManager;
+                    //return sourceManager;
+                    return getASTContext().getSourceManager();
                 }
 
                 std::vector<std::string> getTemplateParameterNames() const
@@ -379,11 +383,12 @@ namespace TRAFO_NAMESPACE
                 const clang::ClassTemplateDecl* classTemplateDecl;
 
             public:
-            
-                
+                   
                 const Declaration& declaration;
                 const clang::CXXRecordDecl& decl;
                 const clang::SourceRange sourceRange;
+                const clang::SourceLocation innerLocBegin;
+                const clang::SourceLocation innerLocEnd;
                 const std::string name;                
                 const bool isTemplatePartialSpecialization;
                 const std::vector<std::string> templatePartialSpecializationArguments;            
@@ -410,13 +415,15 @@ namespace TRAFO_NAMESPACE
                     declaration(declaration),
                     decl(decl),
                     sourceRange(classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()),
+                    innerLocBegin(decl.getBraceRange().getBegin().getLocWithOffset(1)),
+                    innerLocEnd(decl.getBraceRange().getEnd()),
                     name(decl.getNameAsString()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
                     templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, sourceManager, declaration.templateTypeParameters) : std::vector<std::string>()),
                     publicAccess(nullptr),
                     protectedAccess(nullptr),
                     privateAccess(nullptr),
-                    hasCopyConstructor(false),
+                    hasCopyConstructor(decl.hasUserDeclaredCopyConstructor()),
                     isProxyClassCandidate(true)
                 {
                     using namespace clang::ast_matchers;
@@ -458,18 +465,17 @@ namespace TRAFO_NAMESPACE
                     ADD_MATCHER(Private);
                 #undef ADD_MATCHER
 
-                    // get constructors
+                    // get user provided constructors
                     const std::size_t numConstructors = std::distance(decl.ctor_begin(), decl.ctor_end());
                     constructors.reserve(numConstructors);
                 #define ADD_MATCHER(ACCESS) \
-                    matcher.addMatcher(cxxConstructorDecl(is ## ACCESS()).bind("constructorDecl"), \
+                    matcher.addMatcher(cxxConstructorDecl(allOf(is ## ACCESS(), isUserProvided())).bind("constructorDecl"), \
                         [&] (const MatchFinder::MatchResult& result) mutable \
                         { \
                             if (const clang::CXXConstructorDecl* decl = result.Nodes.getNodeAs<clang::CXXConstructorDecl>("constructorDecl")) \
                             { \
                                 constructors.emplace_back(*decl, AccessSpecifier::Type::ACCESS); \
                                 ptr ## ACCESS ## Constructors.emplace_back(&constructors.back()); \
-                                hasCopyConstructor |= constructors.back().isCopyConstructor; \
                             } \
                         }, &decl)
 
@@ -569,6 +575,8 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates(false)
             { ; }
 
+            virtual clang::ASTContext& getASTContext() const = 0;
+
             virtual bool isTemplated() const = 0;
 
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false) = 0;
@@ -597,6 +605,11 @@ namespace TRAFO_NAMESPACE
                 declaration(decl, isDefinition, sourceManager)
             {
                 ;
+            }
+
+            virtual clang::ASTContext& getASTContext() const
+            {
+                return declaration.getASTContext();
             }
 
             virtual bool isTemplated() const
@@ -668,6 +681,11 @@ namespace TRAFO_NAMESPACE
                 declaration(decl, isDefinition, sourceManager)
             {
                 ;
+            }
+
+            virtual clang::ASTContext& getASTContext() const
+            {
+                return declaration.getASTContext();
             }
 
             virtual bool isTemplated() const

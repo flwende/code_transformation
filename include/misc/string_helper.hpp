@@ -60,6 +60,12 @@ namespace TRAFO_NAMESPACE
             return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
         }
 
+        static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const bool insertLeadingNewline)
+        {
+            const clang::LangOptions langOpts;
+            return dumpStmtToStringHumanReadable(stmt, langOpts, insertLeadingNewline);
+        }
+
         static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
             if (decl == nullptr) // return empty string if 'decl' is invalid
@@ -73,8 +79,16 @@ namespace TRAFO_NAMESPACE
             return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
         }
 
+        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const bool insertLeadingNewline)
+        {
+            const clang::LangOptions langOpts;
+            return dumpDeclToStringHumanReadable(decl, langOpts, insertLeadingNewline);
+        }
+
         static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, clang::SourceManager& sm, const clang::LangOptions& langOpts)
         {
+            if (!sourceRange.isValid()) return std::string("");
+
             const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sm, langOpts);
             return sourceText.str();
         }

@@ -36,6 +36,11 @@ namespace fw
         os << "(" << c.x << ")";
         return os;
     }
+
+    struct D
+    {
+        // empty
+    };
 }
 
 #endif
