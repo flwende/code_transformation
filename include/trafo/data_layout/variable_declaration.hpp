@@ -6,10 +6,8 @@
 #if !defined(TRAFO_DATA_LAYOUT_VARIABLE_DECLARATION_HPP)
 #define TRAFO_DATA_LAYOUT_VARIABLE_DECLARATION_HPP
 
-#include <iostream>
-#include <string>
 #include <cstdint>
-#include <misc/matcher.hpp>
+#include <iostream>
 #include <misc/ast_helper.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
@@ -70,8 +68,6 @@ namespace TRAFO_NAMESPACE
 
             static ContainerDeclaration make(const clang::VarDecl& decl, clang::ASTContext& context, const std::string containerType)
             {
-                using namespace clang::ast_matchers;
-
                 clang::QualType innerMostType;
                 const clang::Type* type = decl.getType().getTypePtrOrNull();
                 bool isNested = false;

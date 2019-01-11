@@ -7,8 +7,8 @@
 #define TRAFO_DATA_LAYOUT_CLASS_META_DATA_HPP
 
 #include <iostream>
-#include <vector>
 #include <cstdint>
+#include <vector>
 #include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
 #include <misc/rewriter.hpp>

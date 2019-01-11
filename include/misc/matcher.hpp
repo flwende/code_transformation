@@ -6,9 +6,8 @@
 #if !defined(MISC_MATCHER_HPP)
 #define MISC_MATCHER_HPP
 
-#include <string>
-#include <vector>
 #include <memory>
+#include <vector>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 
 #if !defined(TRAFO_NAMESPACE)

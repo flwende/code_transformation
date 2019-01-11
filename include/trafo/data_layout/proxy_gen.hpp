@@ -6,29 +6,25 @@
 #if !defined(TRAFO_DATA_LAYOUT_PROXY_GEN_HPP)
 #define TRAFO_DATA_LAYOUT_PROXY_GEN_HPP
 
-#include <iostream>
 #include <cstdint>
+#include <iostream>
 #include <memory>
-#include <vector>
 #include <set>
+#include <vector>
 
-#include <clang/AST/AST.h>
-#include <clang/AST/ASTConsumer.h>
-#include <clang/AST/ASTContext.h>
-#include <clang/AST/DeclTemplate.h>
-#include <clang/ASTMatchers/ASTMatchFinder.h>
-#include <clang/ASTMatchers/ASTMatchers.h>
-#include <clang/Frontend/CompilerInstance.h>
-#include <clang/Frontend/FrontendActions.h>
-#include <clang/Rewrite/Core/Rewriter.h>
-#include <clang/Tooling/CommonOptionsParser.h>
-#include <clang/Tooling/Tooling.h>
-
-#include <misc/string_helper.hpp>
-#include <misc/rewriter.hpp>
+#include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
+#include <misc/rewriter.hpp>
+#include <misc/string_helper.hpp>
 #include <trafo/data_layout/class_meta_data.hpp>
 #include <trafo/data_layout/variable_declaration.hpp>
+
+#include <clang/AST/ASTConsumer.h>
+#include <clang/AST/ASTContext.h>
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/FrontendActions.h>
+#include <clang/Tooling/CommonOptionsParser.h>
+#include <clang/Tooling/Tooling.h>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw

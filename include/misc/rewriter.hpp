@@ -6,9 +6,9 @@
 #if !defined(MISC_REWRITER_HPP)
 #define MISC_REWRITER_HPP
 
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 

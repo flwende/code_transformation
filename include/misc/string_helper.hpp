@@ -6,12 +6,14 @@
 #if !defined(MISC_STRING_HELPER_HPP)
 #define MISC_STRING_HELPER_HPP
 
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <sstream>
 #include <string>
-#include <cctype>
 #include <vector>
-#include <algorithm>
 #include <clang/AST/AST.h>
+#include <clang/Lex/Lexer.h>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
