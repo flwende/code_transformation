@@ -527,6 +527,8 @@ namespace TRAFO_NAMESPACE
         {
             if (!candidate.get()) return;
 
+            candidate->printInfo();
+
             const clang::SourceManager& sourceManager = context.getSourceManager();
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
@@ -543,6 +545,9 @@ namespace TRAFO_NAMESPACE
 
             rewriter.replace(fileStartToDecl, header + headerEpilogue);
             rewriter.replace(declToFileEnd, std::string("\n"));
+
+            // remove all declarations / definitions that are not instantiated
+
         }
         
         void addProxyClassToSource(const std::vector<std::unique_ptr<ClassMetaData>>& proxyClassTargets, clang::ASTContext& context)

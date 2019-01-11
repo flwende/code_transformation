@@ -626,8 +626,18 @@ namespace TRAFO_NAMESPACE
         {
             using Base = ClassMetaData;
 
+        protected:
+
             const Base::Declaration declaration;
             std::vector<Base::Definition> definitions;
+
+            CXXClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
+                :
+                Base(decl.getNameAsString()),
+                declaration(decl, isDefinition)
+            {
+                ;
+            }
 
         public:
 
@@ -704,31 +714,19 @@ namespace TRAFO_NAMESPACE
             }
         };
 
-        class TemplateClassMetaData : public ClassMetaData
+        class TemplateClassMetaData : public CXXClassMetaData
         {
-            using Base = ClassMetaData;
-
-            const Base::Declaration declaration;
-            std::vector<Base::Definition> definitions;
+            using Base = CXXClassMetaData;
+            using Base::declaration;
+            using Base::definitions;
 
         public:
 
             TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
                 :
-                Base(decl.getNameAsString()),
-                declaration(decl, isDefinition)
+                Base(decl, isDefinition)
             {
                 ;
-            }
-
-            virtual clang::ASTContext& getASTContext() const
-            {
-                return declaration.getASTContext();
-            }
-
-            virtual const clang::SourceManager& getSourceManager() const
-            {
-                return declaration.getSourceManager();
             }
 
             virtual bool isTemplated() const
@@ -755,21 +753,6 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates |= definitions.back().isProxyClassCandidate;
 
                 return true;
-            }
-
-            virtual const Declaration& getDeclaration() const
-            {
-                return declaration;
-            }
-
-            virtual const std::vector<Base::Definition>& getDefinitions() const
-            {
-                return definitions;
-            }
-
-            virtual const clang::SourceLocation getSourceLocation() const
-            {
-                return declaration.sourceRange.getBegin();
             }
 
             virtual void printInfo(const std::string indent = std::string("")) const
