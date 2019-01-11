@@ -49,13 +49,11 @@ namespace TRAFO_NAMESPACE
 
         Rewriter(clang::Rewriter& rewriter)
             :
-            matcher(nullptr),
             rewriter(rewriter)
         { ; }
 
         Rewriter(const Rewriter& other)
             :
-            matcher(nullptr),
             rewriter(other.rewriter)
         { ; }
 
@@ -74,7 +72,7 @@ namespace TRAFO_NAMESPACE
             return rewriter.getLangOpts();
         }
 
-        clang::RewriteBuffer& getEditBuffer(clang::FileID FID)
+        clang::RewriteBuffer& getEditBuffer(const clang::FileID FID)
         {
             return rewriter.getEditBuffer(FID);
         }
@@ -115,18 +113,18 @@ namespace TRAFO_NAMESPACE
         template <typename T>
         void addMatcher(const T& match, const Kernel& kernel)
         {
-            if (matcher.get() == nullptr)
+            if (!matcher.get())
             {
                 matcher = std::unique_ptr<clang::ast_matchers::MatchFinder>(new clang::ast_matchers::MatchFinder());
             }
-
+            
             actions.emplace_back(new Action(kernel, *this));
             matcher->addMatcher(match, actions.back().get());
         }
 
         void run(clang::ASTContext& context) const
         {
-            if (matcher.get() != nullptr)
+            if (matcher.get())
             {
                 matcher->matchAST(context);
             }
@@ -134,7 +132,7 @@ namespace TRAFO_NAMESPACE
 
         void clear()
         {
-            if (matcher.get() != nullptr)
+            if (matcher.get())
             {
                 delete matcher.release();
             }

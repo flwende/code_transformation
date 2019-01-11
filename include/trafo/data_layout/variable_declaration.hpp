@@ -72,46 +72,47 @@ namespace TRAFO_NAMESPACE
             {
                 using namespace clang::ast_matchers;
 
+                clang::QualType innerMostType;
+                const clang::Type* type = decl.getType().getTypePtrOrNull();
                 bool isNested = false;
                 std::uint32_t nestingLevel = 0;
-                clang::QualType innerMostType;
 
-                // in the first instance 'type' is either a class or structur type: it is the container type itself
-                const clang::Type* type = decl.getType().getTypePtrOrNull();
                 // check for nested container declaration
-                do
+                // note: in the first instance 'type' is either a class or structur type (it is the container type itself)
+                while (type)
                 {
                     // we can do this as any variable declaration of the container is a specialzation of containerType<T,..>
-                    const clang::TemplateSpecializationType* tsType = (type ? type->getAs<clang::TemplateSpecializationType>() : nullptr);
-                    if (tsType != nullptr && tsType->getNumArgs() > 0)
+                    if (const clang::TemplateSpecializationType* const tsType = type->getAs<clang::TemplateSpecializationType>())
                     {
                         // the first template argument is the type of the content of the container
                         clang::QualType taQualType = tsType->getArg(0).getAsType();
-                        const clang::Type* taType = taQualType.getTypePtrOrNull();
-                        // if it is a class or structure type, check for it being a containerType
-                        if (taType != nullptr && (taType->isClassType() || taType->isStructureType()))
+                        if (const clang::Type* const taType = taQualType.getTypePtrOrNull())
                         {
-                            // if it is a container, get nesting information and continue the loop execution
-                            if (const clang::CXXRecordDecl* decl = taType->getAsCXXRecordDecl())
+                            // if it is a class or structure type, check for it being a containerType
+                            if (taType->isClassType() || taType->isStructureType())
                             {
                                 // if it is a container, get nesting information and continue the loop execution
-                                if (decl->getNameAsString() == containerType)
+                                if (const clang::CXXRecordDecl* const cxxRecordDecl = taType->getAsCXXRecordDecl())
                                 {
-                                    isNested |= true;
-                                    ++nestingLevel;
-                                    type = taType;
-                                    continue;
+                                    // if it is a container, get nesting information and continue the loop execution
+                                    if (cxxRecordDecl->getNameAsString() == containerType)
+                                    {
+                                        isNested |= true;
+                                        ++nestingLevel;
+                                        type = taType;
+                                        continue;
+                                    }
                                 }
                             }
                         }
                         // this point is reached if the a non-vector type has been encountered
                         innerMostType = taQualType;
                     }
+
                     // break condition for the outer loop!
                     // this point is reached only if the current template argument type is not the specified container type
                     type = nullptr;
                 }
-                while (type != nullptr);
 
                 return ContainerDeclaration(decl, isNested, nestingLevel, innerMostType);
             }

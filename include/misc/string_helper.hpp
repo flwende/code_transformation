@@ -23,67 +23,65 @@ namespace TRAFO_NAMESPACE
     {
         static std::string dumpStmtToString(const clang::Stmt* const stmt, const clang::SourceManager& sourceManager)
         {
-            if (stmt == nullptr) // return empty string if 'stmt' is invalid
-            {
-                return std::string("");
-            }
+            // return empty string if 'stmt' is invalid
+            if (!stmt) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
 
-            std::string str; // will hold the content
-            llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
             // note: 'const' reference is casted away (looks like the signature of 'dump' is inappropriate)!
-            stmt->dump(buffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'buffer'
-            return buffer.str(); // get content of 'buffer'
+            stmt->dump(streamBuffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'streamBuffer'
+            
+            return streamBuffer.str(); // get content of 'streamBuffer'
         }
 
         static std::string dumpDeclToString(const clang::Decl* const decl)
         {
-            if (decl == nullptr) // return empty string if 'decl' is invalid
-            {
-                return std::string("");
-            }
+            // return empty string if 'decl' is invalid
+            if (!decl) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
 
-            std::string str; // will hold the content
-            llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
-            decl->dump(buffer); // dump content of 'decl' to 'buffer'
-            return buffer.str(); // get content of 'buffer'
+            decl->dump(streamBuffer); // dump content of 'decl' to 'streamBuffer'
+
+            return streamBuffer.str(); // get content of 'streamBuffer'
         }
 
         static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
-            if (stmt == nullptr) // return empty string if 'stmt' is invalid
-            {
-                return std::string("");
-            }
+            // return empty string if 'stmt' is invalid
+            if (!stmt) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
 
-            std::string str; // will hold the content
-            llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
-            stmt->printPretty(buffer, nullptr, clang::PrintingPolicy(langOpts), 0); // dump content of 'stmt' to 'buffer'
-            return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
+            stmt->printPretty(streamBuffer, nullptr, clang::PrintingPolicy(langOpts), 0); // dump content of 'stmt' to 'streamBuffer'
+
+            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
         }
 
         static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const bool insertLeadingNewline)
         {
-            const clang::LangOptions langOpts;
-            return dumpStmtToStringHumanReadable(stmt, langOpts, insertLeadingNewline);
+            return dumpStmtToStringHumanReadable(stmt, clang::LangOptions(), insertLeadingNewline);
         }
 
         static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
-            if (decl == nullptr) // return empty string if 'decl' is invalid
-            {
-                return std::string("");
-            }
+            // return empty string if 'decl' is invalid
+            if (!decl) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
 
-            std::string str; // will hold the content
-            llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
-            decl->print(buffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'buffer'
-            return (insertLeadingNewline ? std::string("\n") : std::string("")) + buffer.str(); // get content of 'buffer'
+            decl->print(streamBuffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'streamBuffer'
+
+            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
         }
 
         static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const bool insertLeadingNewline)
         {
-            const clang::LangOptions langOpts;
-            return dumpDeclToStringHumanReadable(decl, langOpts, insertLeadingNewline);
+            return dumpDeclToStringHumanReadable(decl, clang::LangOptions(), insertLeadingNewline);
         }
 
         static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager, const clang::LangOptions& langOpts)
@@ -91,13 +89,13 @@ namespace TRAFO_NAMESPACE
             if (!sourceRange.isValid()) return std::string("");
 
             const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sourceManager, langOpts);
+
             return sourceText.str();
         }
 
         static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager)
         {
-            const clang::LangOptions langOpts;
-            return dumpSourceRangeToString(sourceRange, sourceManager, langOpts);
+            return dumpSourceRangeToString(sourceRange, sourceManager, clang::LangOptions());
         }
 
         static std::vector<std::string> splitString(const std::string& input, const char delimiter)
@@ -105,32 +103,38 @@ namespace TRAFO_NAMESPACE
             std::vector<std::string> output;
             std::string tmp;
             std::istringstream inputStream(input);
+
             while (std::getline(inputStream, tmp, delimiter))
             {
-                if (tmp != "")
+                if (tmp != std::string(""))
                 {
                     output.push_back(tmp);
                 }
             }
+
             return output;
         }
 
-        static std::string removeSpaces(const std::string& str)
+        static std::string removeSpaces(const std::string& input)
         {
-            std::string output(str);
+            std::string output(input);
+
             output.erase(std::remove_if(output.begin(), output.end(), ::isspace), output.end());
+
             return output;
         }
 
-        static std::string concat(const std::vector<std::string>& input, const std::string delimiter = "")
+        static std::string concat(const std::vector<std::string>& input, const std::string delimiter = std::string(""))
         {
             std::string output;
             const std::uint32_t numElements = input.size();
             std::uint32_t elementId = 0;
-            for (auto element : input)
+
+            for (const std::string element : input)
             {
                 output += element + (++elementId < numElements ? delimiter : std::string(""));
             }
+
             return output;
         }
     }

@@ -19,33 +19,36 @@ namespace TRAFO_NAMESPACE
     {
         static std::string getDataTypeName(const clang::QualType& dataType)
         {
-            const clang::Type* type = dataType.getTypePtrOrNull();
-            if (type != nullptr && (type->isClassType() || type->isStructureType()))
+            if (const clang::Type* const type = dataType.getTypePtrOrNull())
             {
-                clang::CXXRecordDecl* decl = type->getAsCXXRecordDecl();
-                return decl->getNameAsString();
+                if (type->isClassType() || type->isStructureType())
+                {
+                    const clang::CXXRecordDecl& decl = *(type->getAsCXXRecordDecl());
+                    return decl.getNameAsString();
+                }
             }
+
             return dataType.getAsString();
         }
 
         struct ClassDecl
         {
-            static const clang::CXXRecordDecl* getTemplatedDecl(const clang::CXXRecordDecl& decl)
+            static const clang::CXXRecordDecl* const getTemplatedDecl(const clang::CXXRecordDecl& decl)
             {
                 return &decl;
             }
 
-            static const clang::CXXRecordDecl* getTemplatedDecl(const clang::ClassTemplateDecl& decl)
+            static const clang::CXXRecordDecl* const getTemplatedDecl(const clang::ClassTemplateDecl& decl)
             {
                 return decl.getTemplatedDecl();
             }
 
-            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const clang::ClassTemplateDecl& decl)
+            static const clang::ClassTemplateDecl* const getDescribedClassTemplate(const clang::ClassTemplateDecl& decl)
             {
                 return &decl;
             }
 
-            static const clang::ClassTemplateDecl* getDescribedClassTemplate(const clang::CXXRecordDecl& decl)
+            static const clang::ClassTemplateDecl* const getDescribedClassTemplate(const clang::CXXRecordDecl& decl)
             {
                 return decl.getDescribedClassTemplate();
             }
