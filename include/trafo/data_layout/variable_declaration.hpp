@@ -82,6 +82,7 @@ namespace TRAFO_NAMESPACE
                     {
                         // the first template argument is the type of the content of the container
                         clang::QualType taQualType = tsType->getArg(0).getAsType();
+                        
                         if (const clang::Type* const taType = taQualType.getTypePtrOrNull())
                         {
                             // if it is a class or structure type, check for it being a containerType
@@ -101,6 +102,7 @@ namespace TRAFO_NAMESPACE
                                 }
                             }
                         }
+
                         // this point is reached if the a non-vector type has been encountered
                         innerMostType = taQualType;
                     }
