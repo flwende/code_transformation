@@ -266,10 +266,6 @@ namespace TRAFO_NAMESPACE
 
             class Declaration
             {
-                clang::SourceManager& sourceManager;
-                const clang::CXXRecordDecl* cxxRecordDecl;
-                const clang::ClassTemplateDecl* classTemplateDecl;
-
                 std::vector<const TemplateParameter*> getTemplateTypeParameters() const
                 {
                     std::vector<const TemplateParameter*> templateTypeParameters;
@@ -282,6 +278,11 @@ namespace TRAFO_NAMESPACE
                     }
                     return templateTypeParameters;
                 }
+
+                const clang::CXXRecordDecl* cxxRecordDecl;
+                const clang::ClassTemplateDecl* classTemplateDecl;
+                clang::ASTContext& context;
+                clang::SourceManager& sourceManager;
 
             public:
         
@@ -296,11 +297,12 @@ namespace TRAFO_NAMESPACE
                 const bool isClass;
 
                 template <typename T>
-                Declaration(const T& decl, const bool isDefinition, clang::SourceManager& sourceManager)
+                Declaration(const T& decl, const bool isDefinition)
                     :
-                    sourceManager(sourceManager),
                     cxxRecordDecl(ClassDecl::getTemplatedDecl(decl)), // is never nullptr
                     classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
+                    context(cxxRecordDecl->getASTContext()),
+                    sourceManager(context.getSourceManager()),
                     sourceRange(decl.getSourceRange()),
                     name(decl.getNameAsString()),
                     namespaces(Namespace::getFromDecl(decl)),
@@ -314,13 +316,12 @@ namespace TRAFO_NAMESPACE
 
                 clang::ASTContext& getASTContext() const
                 {
-                    return cxxRecordDecl->getASTContext();
+                    return context;
                 }
 
-                clang::SourceManager& getSourceMgr() const
+                clang::SourceManager& getSourceManager() const
                 {
-                    //return sourceManager;
-                    return getASTContext().getSourceManager();
+                    return sourceManager;
                 }
 
                 std::vector<std::string> getTemplateParameterNames() const
@@ -410,7 +411,7 @@ namespace TRAFO_NAMESPACE
 
                 Definition(const Declaration& declaration, const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
                     :
-                    sourceManager(declaration.getSourceMgr()),
+                    sourceManager(declaration.getSourceManager()),
                     classTemplateDecl(ClassDecl::getDescribedClassTemplate(decl)), // can be nullptr
                     declaration(declaration),
                     decl(decl),
@@ -524,6 +525,11 @@ namespace TRAFO_NAMESPACE
                     }
                 }
 
+                clang::SourceManager& getSourceManager() const
+                {
+                    return declaration.getSourceManager();
+                }
+
                 void printInfo(const std::string indent = "") const
                 {
                     std::cout << indent << "* DEFINITION:" << std::endl;
@@ -559,24 +565,21 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-        protected:
-
-            clang::SourceManager& sourceManager;
-
         public:
 
             const std::string name;
             bool containsProxyClassCandidates;
             
-            ClassMetaData(const std::string name, clang::SourceManager& sourceManager)
-                :
-                sourceManager(sourceManager),                
+            ClassMetaData(const std::string name)
+                :                
                 name(name),
                 containsProxyClassCandidates(false)
             { ; }
 
             virtual clang::ASTContext& getASTContext() const = 0;
 
+            virtual clang::SourceManager& getSourceManager() const = 0;
+            
             virtual bool isTemplated() const = 0;
 
             virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false) = 0;
@@ -599,10 +602,10 @@ namespace TRAFO_NAMESPACE
 
         public:
 
-            CXXClassMetaData(const clang::CXXRecordDecl& decl, const bool isDefinition, clang::SourceManager& sourceManager)
+            CXXClassMetaData(const clang::CXXRecordDecl& decl, const bool isDefinition)
                 :
-                Base(decl.getNameAsString(), sourceManager),
-                declaration(decl, isDefinition, sourceManager)
+                Base(decl.getNameAsString()),
+                declaration(decl, isDefinition)
             {
                 ;
             }
@@ -610,6 +613,11 @@ namespace TRAFO_NAMESPACE
             virtual clang::ASTContext& getASTContext() const
             {
                 return declaration.getASTContext();
+            }
+
+            virtual clang::SourceManager& getSourceManager() const
+            {
+                return declaration.getSourceManager();
             }
 
             virtual bool isTemplated() const
@@ -675,10 +683,10 @@ namespace TRAFO_NAMESPACE
 
         public:
 
-            TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition, clang::SourceManager& sourceManager)
+            TemplateClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
                 :
-                Base(decl.getNameAsString(), sourceManager),
-                declaration(decl, isDefinition, sourceManager)
+                Base(decl.getNameAsString()),
+                declaration(decl, isDefinition)
             {
                 ;
             }
@@ -686,6 +694,11 @@ namespace TRAFO_NAMESPACE
             virtual clang::ASTContext& getASTContext() const
             {
                 return declaration.getASTContext();
+            }
+
+            virtual clang::SourceManager& getSourceManager() const
+            {
+                return declaration.getSourceManager();
             }
 
             virtual bool isTemplated() const

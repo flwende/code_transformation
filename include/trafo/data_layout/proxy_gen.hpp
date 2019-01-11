@@ -247,7 +247,6 @@ namespace TRAFO_NAMESPACE
     class InsertProxyClassImplementation : public clang::ASTConsumer
     {
         Rewriter rewriter;
-        clang::SourceManager& sourceManager;
         
         std::vector<ContainerDeclaration> containerDeclarations;
         std::set<std::string> proxyClassTargetNames;
@@ -312,7 +311,6 @@ namespace TRAFO_NAMESPACE
             using namespace clang::ast_matchers;
 
             Matcher matcher;
-            clang::SourceManager& sm = rewriter.getSourceMgr();
 
             for (auto name : proxyClassTargetNames)
             {
@@ -323,7 +321,7 @@ namespace TRAFO_NAMESPACE
                         if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDeclaration"))
                         {
                             if (decl->isThisDeclarationADefinition()) return;
-                            proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, false, sm));
+                            proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, false));
                         }
                     });
                 
@@ -341,7 +339,7 @@ namespace TRAFO_NAMESPACE
                             }
                                        
                             // not found
-                            proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, true, sm));
+                            proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, true));
                             proxyClassTargets.back()->addDefinition(*(decl->getTemplatedDecl()));
                         }
                     });
@@ -371,7 +369,8 @@ namespace TRAFO_NAMESPACE
                             const bool isDefinition = decl->isThisDeclarationADefinition();
                             for (auto& target : proxyClassTargets)
                             {
-                                // if it is a specialization of a template class: skip this class definition
+                                // if it is a specialization of a template class, skip this class definition!
+                                // note: if there are templated classes with that name, they (should) have been found by any previous matcher
                                 if (target->name == name)
                                 {
                                     if (target->isTemplated()) return;
@@ -379,7 +378,7 @@ namespace TRAFO_NAMESPACE
                                 }
                             }
                             
-                            proxyClassTargets.emplace_back(new CXXClassMetaData(*decl, isDefinition, sm));
+                            proxyClassTargets.emplace_back(new CXXClassMetaData(*decl, isDefinition));
                             if (isDefinition)
                             {
                                 proxyClassTargets.back()->addDefinition(*decl, false);
@@ -398,7 +397,7 @@ namespace TRAFO_NAMESPACE
             proxyClassDeclaration << indent << "namespace proxy_internal" << std::endl << "{" << std::endl;
             if (declaration.templateParameters.size() > 0)
             {
-                proxyClassDeclaration << indent << "\t" << dumpSourceRangeToString(declaration.templateParameterListSourceRange, sourceManager);
+                proxyClassDeclaration << indent << "\t" << dumpSourceRangeToString(declaration.templateParameterListSourceRange, declaration.getSourceManager());
                 proxyClassDeclaration << indent << ">" << std::endl;
             }
             proxyClassDeclaration << indent << "\t" << (declaration.isStruct ? "struct " : "class ") << declaration.name << "_proxy;" << std::endl;
@@ -437,7 +436,7 @@ namespace TRAFO_NAMESPACE
 
                 // dump the definition of the copy constructor starting at the parameter name
                 clang::SourceRange everythingFromParmVarDeclName = clang::SourceRange(parameter->getEndLoc(), constructorDecl.getEndLoc());
-                constructorDefinition << dumpSourceRangeToString(everythingFromParmVarDeclName, sourceManager);
+                constructorDefinition << dumpSourceRangeToString(everythingFromParmVarDeclName, definition.getSourceManager());
                 if (constructorDecl.hasBody())
                 {
                     constructorDefinition << "}";
@@ -527,13 +526,13 @@ namespace TRAFO_NAMESPACE
 
         void generateProxyClassDefinition(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter, clang::ASTContext& context, const std::string header = std::string(""))
         {
-            const clang::SourceManager& sm = context.getSourceManager();
+            const clang::SourceManager& sourceManager = candidate->getSourceManager();
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
 
             // remove everything outside the outer namespace
-            clang::SourceLocation fileStart = sm.getLocForStartOfFile(sm.getFileID(candidate->getSourceLocation()));
-            clang::SourceLocation fileEnd = sm.getLocForEndOfFile(sm.getFileID(candidate->getSourceLocation()));
+            clang::SourceLocation fileStart = sourceManager.getLocForStartOfFile(sourceManager.getFileID(candidate->getSourceLocation()));
+            clang::SourceLocation fileEnd = sourceManager.getLocForEndOfFile(sourceManager.getFileID(candidate->getSourceLocation()));
             
             const std::string headerSepSpace = std::string(header.empty() ? "" : "\n\n");
             if (declaration.namespaces.size() > 0)
@@ -565,7 +564,7 @@ namespace TRAFO_NAMESPACE
                 modifyOriginalSourceCode(target, rewriter);
 
                 // TODO: replace by writing back to file!
-                rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(target->getSourceLocation())).write(llvm::outs());
+                rewriter.getEditBuffer(rewriter.getSourceManager().getFileID(target->getSourceLocation())).write(llvm::outs());
 
                 std::cout << "########################################################" << std::endl;
 
@@ -573,7 +572,7 @@ namespace TRAFO_NAMESPACE
                 generateProxyClassDefinition(target, proxyClassCreator, context, std::string("// my header"));
 
                 // TODO: replace by writing back to file!
-                proxyClassCreator.getEditBuffer(proxyClassCreator.getSourceMgr().getFileID(target->getSourceLocation())).write(llvm::outs());
+                proxyClassCreator.getEditBuffer(proxyClassCreator.getSourceManager().getFileID(target->getSourceLocation())).write(llvm::outs());
                 
                 std::cout << "########################################################" << std::endl;
             }
@@ -583,8 +582,7 @@ namespace TRAFO_NAMESPACE
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter)
             :
-            rewriter(clangRewriter),
-            sourceManager(rewriter.getSourceMgr())
+            rewriter(clangRewriter)
         { ; }
 
         void HandleTranslationUnit(clang::ASTContext& context) override
@@ -611,7 +609,7 @@ namespace TRAFO_NAMESPACE
                 std::cout << "############################################################################################################################" << std::endl;
 
                 // backup the original buffer content
-                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceMgr().getFileID(candidate->getSourceLocation()));
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(rewriter.getSourceManager().getFileID(candidate->getSourceLocation()));
                 std::string originalBufferStr;
                 llvm::raw_string_ostream originalBuffer(originalBufferStr);
                 rewriteBuffer.write(originalBuffer);
