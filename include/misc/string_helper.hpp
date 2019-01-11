@@ -21,7 +21,7 @@ namespace TRAFO_NAMESPACE
 {
     namespace internal
     {
-        static std::string dumpStmtToString(const clang::Stmt* const stmt, clang::SourceManager& sm)
+        static std::string dumpStmtToString(const clang::Stmt* const stmt, const clang::SourceManager& sourceManager)
         {
             if (stmt == nullptr) // return empty string if 'stmt' is invalid
             {
@@ -30,7 +30,8 @@ namespace TRAFO_NAMESPACE
 
             std::string str; // will hold the content
             llvm::raw_string_ostream buffer(str); // buffer using 'str' as internal storage
-            stmt->dump(buffer, sm); // dump content of 'stmt' to 'buffer'
+            // note: 'const' reference is casted away (looks like the signature of 'dump' is inappropriate)!
+            stmt->dump(buffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'buffer'
             return buffer.str(); // get content of 'buffer'
         }
 
@@ -85,18 +86,18 @@ namespace TRAFO_NAMESPACE
             return dumpDeclToStringHumanReadable(decl, langOpts, insertLeadingNewline);
         }
 
-        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, clang::SourceManager& sm, const clang::LangOptions& langOpts)
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager, const clang::LangOptions& langOpts)
         {
             if (!sourceRange.isValid()) return std::string("");
 
-            const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sm, langOpts);
+            const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sourceManager, langOpts);
             return sourceText.str();
         }
 
-        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, clang::SourceManager& sm)
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager)
         {
             const clang::LangOptions langOpts;
-            return dumpSourceRangeToString(sourceRange, sm, langOpts);
+            return dumpSourceRangeToString(sourceRange, sourceManager, langOpts);
         }
 
         static std::vector<std::string> splitString(const std::string& input, const char delimiter)

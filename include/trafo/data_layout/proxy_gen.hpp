@@ -526,7 +526,7 @@ namespace TRAFO_NAMESPACE
 
         void generateProxyClassDefinition(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter, clang::ASTContext& context, const std::string header = std::string(""))
         {
-            const clang::SourceManager& sourceManager = candidate->getSourceManager();
+            const clang::SourceManager& sourceManager = context.getSourceManager();
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
 

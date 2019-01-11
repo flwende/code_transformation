@@ -45,11 +45,11 @@ namespace TRAFO_NAMESPACE
                     name(type == Type::Public ? "public" : (type == Type::Protected ? "protected" : "private"))
                 { ; }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = "") const
                 {
                     std::cout << indent << "* " << name << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
-                    std::cout << indent << "\t+-> scope begin: " << scopeBegin.printToString(sm) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    std::cout << indent << "\t+-> scope begin: " << scopeBegin.printToString(sourceManager) << std::endl;
                 }
             };
 
@@ -84,10 +84,10 @@ namespace TRAFO_NAMESPACE
                     isFundamentalOrTemplated(type != nullptr ? (type->isFundamentalType() || type->isTemplateTypeParmType()) : false)
                 { ; }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = "") const
                 {
                     std::cout << indent << "* name=" << name << ", type=" << typeName << (isConst ? " (const qualified)" : "") << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
                     std::cout << indent << "\t+-> fundamental or templated: " << (isFundamentalOrTemplated ? "yes" : "no") << std::endl;
                 }
@@ -116,10 +116,10 @@ namespace TRAFO_NAMESPACE
                     isPrivate(access == AccessSpecifier::Type::Private)
                 { ; }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = "") const
                 {
                     std::cout << indent << "* " << (isDefaultConstructor ? "default " : (isCopyConstructor ? "copy " : "")) << "constructor" << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
                     std::cout << indent << "\t+-> has body: " << (decl.hasBody() ? "yes" : "no") << std::endl;
                 }
@@ -158,7 +158,7 @@ namespace TRAFO_NAMESPACE
                     return sourceRange;
                 }
 
-                static std::vector<TemplateParameter> getParametersFromDecl(const clang::ClassTemplateDecl* decl, clang::SourceManager& sm)
+                static std::vector<TemplateParameter> getParametersFromDecl(const clang::ClassTemplateDecl* decl, const clang::SourceManager& sourceManager)
                 {
                     std::vector<TemplateParameter> templateParameters;
 
@@ -170,14 +170,14 @@ namespace TRAFO_NAMESPACE
                         for (std::size_t i = 0; i < numParameters; ++i)
                         {
                             const clang::NamedDecl& decl = *(parameterList->getParam(i));
-                            templateParameters.emplace_back(decl, removeSpaces(dumpSourceRangeToString(decl.getSourceRange(), sm)));
+                            templateParameters.emplace_back(decl, removeSpaces(dumpSourceRangeToString(decl.getSourceRange(), sourceManager)));
                         }
                     }
 
                     return templateParameters;
                 }
 
-                static std::vector<std::string> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, clang::SourceManager& sm, const std::vector<const TemplateParameter*>& typeParameters)
+                static std::vector<std::string> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, const clang::SourceManager& sourceManager, const std::vector<const TemplateParameter*>& typeParameters)
                 {
                     std::vector<std::string> argNames;
                     
@@ -214,10 +214,10 @@ namespace TRAFO_NAMESPACE
                     return argNames;
                 }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = "") const
                 {
                     std::cout << indent << "* name=" << name << ", " << (isTypeParameter ? "typename" : "value : ") << (isTypeParameter ? "" : typeName) << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sm) << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                 }
             };
 
@@ -256,9 +256,9 @@ namespace TRAFO_NAMESPACE
                     return namespaces;
                 }
 
-                void printInfo(clang::SourceManager& sm, const std::string indent = "") const
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = "") const
                 {
-                    std::cout << indent << "* " << name << ", " << sourceRange.printToString(sm) << std::endl;
+                    std::cout << indent << "* " << name << ", " << sourceRange.printToString(sourceManager) << std::endl;
                 }
             };
 
@@ -282,7 +282,7 @@ namespace TRAFO_NAMESPACE
                 const clang::CXXRecordDecl* cxxRecordDecl;
                 const clang::ClassTemplateDecl* classTemplateDecl;
                 clang::ASTContext& context;
-                clang::SourceManager& sourceManager;
+                const clang::SourceManager& sourceManager;
 
             public:
         
@@ -319,7 +319,7 @@ namespace TRAFO_NAMESPACE
                     return context;
                 }
 
-                clang::SourceManager& getSourceManager() const
+                const clang::SourceManager& getSourceManager() const
                 {
                     return sourceManager;
                 }
@@ -380,7 +380,7 @@ namespace TRAFO_NAMESPACE
                     isProxyClassCandidate &= !(hasMultiplePublicFieldTypes || hasNonFundamentalPublicFields);
                 }
 
-                clang::SourceManager& sourceManager;
+                const clang::SourceManager& sourceManager;
                 const clang::ClassTemplateDecl* classTemplateDecl;
 
             public:
@@ -525,7 +525,7 @@ namespace TRAFO_NAMESPACE
                     }
                 }
 
-                clang::SourceManager& getSourceManager() const
+                const clang::SourceManager& getSourceManager() const
                 {
                     return declaration.getSourceManager();
                 }
@@ -578,7 +578,7 @@ namespace TRAFO_NAMESPACE
 
             virtual clang::ASTContext& getASTContext() const = 0;
 
-            virtual clang::SourceManager& getSourceManager() const = 0;
+            virtual const clang::SourceManager& getSourceManager() const = 0;
             
             virtual bool isTemplated() const = 0;
 
@@ -615,7 +615,7 @@ namespace TRAFO_NAMESPACE
                 return declaration.getASTContext();
             }
 
-            virtual clang::SourceManager& getSourceManager() const
+            virtual const clang::SourceManager& getSourceManager() const
             {
                 return declaration.getSourceManager();
             }
@@ -696,7 +696,7 @@ namespace TRAFO_NAMESPACE
                 return declaration.getASTContext();
             }
 
-            virtual clang::SourceManager& getSourceManager() const
+            virtual const clang::SourceManager& getSourceManager() const
             {
                 return declaration.getSourceManager();
             }

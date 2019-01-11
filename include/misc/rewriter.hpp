@@ -59,12 +59,12 @@ namespace TRAFO_NAMESPACE
             rewriter(other.rewriter)
         { ; }
 
-        clang::SourceManager& getSourceMgr() const
+        const clang::SourceManager& getSourceMgr() const
         {
             return rewriter.getSourceMgr();
         }
 
-        clang::SourceManager& getSourceManager() const
+        const clang::SourceManager& getSourceManager() const
         {
             return getSourceMgr();
         }

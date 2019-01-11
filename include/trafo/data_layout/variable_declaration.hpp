@@ -35,10 +35,10 @@ namespace TRAFO_NAMESPACE
                 elementDataTypeName(getDataTypeName(elementDataType))
             { ; }
 
-            void print(clang::SourceManager& sm) const
+            void print(const clang::SourceManager& sourceManager) const
             {
                 std::cout << "\t* variable name: " << decl.getNameAsString() << std::endl;
-                std::cout << "\t* range: " << sourceRange.printToString(sm) << std::endl;
+                std::cout << "\t* range: " << sourceRange.printToString(sourceManager) << std::endl;
                 std::cout << "\t* element data type: " << elementDataType.getAsString();
                 if (elementDataType.getAsString() != elementDataTypeName)
                 {
@@ -116,12 +116,12 @@ namespace TRAFO_NAMESPACE
                 return ContainerDeclaration(decl, isNested, nestingLevel, innerMostType);
             }
 
-            void printInfo(clang::SourceManager& sm) const
+            void printInfo(const clang::SourceManager& sourceManager) const
             {
-                Base::print(sm);
+                Base::print(sourceManager);
                 
                 std::cout << "\t* container type: " << containerType.getAsString() << std::endl;
-                std::cout << "\t\t+-> declaration: " << decl.getSourceRange().printToString(sm) << std::endl;
+                std::cout << "\t\t+-> declaration: " << decl.getSourceRange().printToString(sourceManager) << std::endl;
                 std::cout << "\t\t+-> nested: " << (isNested ? "yes" : "no") << std::endl;
                 if (isNested)
                 {
