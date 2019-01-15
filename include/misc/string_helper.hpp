@@ -139,6 +139,47 @@ namespace TRAFO_NAMESPACE
 
             return output;
         }
+
+        struct Indentation
+        {
+            const std::uint32_t value;
+            const std::uint32_t increment;
+
+            Indentation(const std::uint32_t value, const std::uint32_t increment = 1)
+                :
+                value(value),
+                increment(increment)
+            { ; }
+
+            Indentation(const clang::Decl& decl, const std::uint32_t increment = 0)
+                :
+                value(decl.getASTContext().getFullLoc(decl.getSourceRange().getBegin()).getSpellingColumnNumber() - 1),
+                increment(increment > 0 ? increment : decl.getASTContext().getPrintingPolicy().Indentation)
+            { ; }
+
+            Indentation(const Indentation& indentation)
+                :
+                value(indentation.value),
+                increment(indentation.increment)
+            { ; }
+        };
+
+        Indentation operator+(const Indentation& indent, const std::uint32_t n)
+        {
+            return Indentation(indent.value + n * indent.increment, indent.increment);
+        }
+
+        Indentation operator-(const Indentation& indent, const std::uint32_t n)
+        {
+            if (indent.value < (n * indent.increment)) 
+            {
+                return Indentation(0, indent.increment);
+            }
+            else
+            {
+                return Indentation(indent.value - n * indent.increment, indent.increment);
+            }
+        }
     }
 }
 

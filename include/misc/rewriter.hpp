@@ -79,16 +79,22 @@ namespace TRAFO_NAMESPACE
 
         bool insert(const clang::SourceLocation& sourceLocation, const std::string& text, const bool insertAfter = true, const bool indentNewLines = false)
         {
+            if (!sourceLocation.isValid()) return false;
+
             return rewriter.InsertText(sourceLocation, text, insertAfter, indentNewLines);
         }
 
         bool replace(const clang::SourceRange& sourceRange, const std::string& text)
         {
+            if (!sourceRange.isValid()) return false;
+
             return rewriter.ReplaceText(sourceRange, text);
         }
 
         bool remove(const clang::SourceRange& sourceRange)
         {
+            if (!sourceRange.isValid()) return false;
+
             return rewriter.RemoveText(sourceRange);
         }
         

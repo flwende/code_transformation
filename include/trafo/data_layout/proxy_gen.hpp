@@ -396,41 +396,72 @@ namespace TRAFO_NAMESPACE
             return (proxyClassTargets.size() > 0);
         }
         
-        std::string generateProxyClassDeclaration(const ClassMetaData::Declaration& declaration, const std::string indent = std::string(""))
+        std::string generateProxyClassDeclaration(const ClassMetaData::Declaration& declaration)
         {
+            const std::string indent(declaration.indent.value, ' ');
+            const std::string extIndent(declaration.indent.value + declaration.indent.increment, ' ');
             std::stringstream proxyClassDeclaration;
 
-            proxyClassDeclaration << indent << "namespace proxy_internal" << std::endl << "{" << std::endl;
-            if (declaration.templateParameters.size() > 0)
+            proxyClassDeclaration << indent << "namespace proxy_internal\n";
+            proxyClassDeclaration << indent << "{\n";
+            if (declaration.templateParameters.size())
             {
-                proxyClassDeclaration << indent << "\t" << dumpSourceRangeToString(declaration.templateParameterListSourceRange, declaration.getSourceManager());
-                proxyClassDeclaration << indent << ">" << std::endl;
+                const clang::SourceManager& sourceManager = declaration.getSourceManager();
+                const std::string parameterList = dumpSourceRangeToString(declaration.templateParameterListSourceRange, sourceManager);
+                proxyClassDeclaration << extIndent << parameterList << ">\n";
             }
-            proxyClassDeclaration << indent << "\t" << (declaration.isStruct ? "struct " : "class ") << declaration.name << "_proxy;" << std::endl;
-            proxyClassDeclaration << indent << "}";
+            proxyClassDeclaration << extIndent << (declaration.isStruct ? "struct " : "class ") << declaration.name << "_proxy;\n";
+            proxyClassDeclaration << indent << "}\n\n";
 
             return proxyClassDeclaration.str();
         }
 
-        std::string generateUsingStmt(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        std::string generateProxyClassUsingStmt(const ClassMetaData::Definition& definition)
         {
+            const Indentation insideClassIndent = definition.declaration.indent + 1;
+            const std::string indent(insideClassIndent.value, ' ');
             std::stringstream usingStmt;
 
-            usingStmt << indent << "using " << definition.name << "_proxy = proxy_internal::" << definition.name << "_proxy";
+            usingStmt << indent << "using " << definition.name << "_proxy = " << definition.declaration.namespaceString << "proxy_internal::" << definition.name << "_proxy";
             if (definition.isTemplatePartialSpecialization)
             {
-                usingStmt << "<" << concat(definition.templatePartialSpecializationArguments, std::string(", ")) << ">";
+                usingStmt << "<" << concat(definition.getTemplatePartialSpecializationArgumentNames(), std::string(", ")) << ">";
             }
             else if (definition.declaration.templateParameters.size() > 0)
             {
                 usingStmt << "<" << concat(definition.declaration.getTemplateParameterNames(), std::string(", ")) << ">";
             }
+            usingStmt << ";\n";
 
             return usingStmt.str();
         }
 
-        std::string generateConstructorClassFromProxyClass(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        std::string generateConstructorInitializerList(const ClassMetaData::Definition& definition, const std::string rhs = std::string("rhs"), const Indentation indentation = Indentation(0))
         {
+            const std::string indent(indentation.value, ' ');
+
+            if (const std::uint32_t numInitializers = definition.fields.size())
+            {
+                std::stringstream initializerList;
+
+                initializerList << indent << ":\n";
+                for (std::uint32_t i = 0; i < numInitializers; ++i)
+                {
+                    const std::string fieldName = definition.fields[i].name;
+                    initializerList << indent << fieldName << "(" << rhs << "." << fieldName;
+                    initializerList << ((i + 1) < numInitializers ? "),\n" : ")\n");
+                }
+
+                return initializerList.str();
+            }
+            
+            return std::string("");
+        }
+
+        std::string generateConstructorClassFromProxyClass(const ClassMetaData::Definition& definition)
+        {
+            const Indentation insideClassIndent = definition.declaration.indent + 1;
+            const std::string indent(insideClassIndent.value, ' ');
             std::stringstream constructorDefinition;
 
             if (definition.hasCopyConstructor)
@@ -451,24 +482,12 @@ namespace TRAFO_NAMESPACE
             }
             else
             {
-                // signature
-                constructorDefinition << indent << definition.name << "(const " << definition.name << "_proxy& other) ";
-
-                // initializer list
-                if (const std::uint32_t numInitializers = definition.fields.size())
-                {
-                    constructorDefinition << ": ";
-                    for (std::uint32_t i = 0; i < numInitializers; ++i)
-                    {
-                        const std::string fieldName = definition.fields[i].name;
-                        constructorDefinition << fieldName << "(other." << fieldName;
-                        constructorDefinition << ((i + 1) < numInitializers ? "), " : ") ");
-                    }
-                }
-
-                // no body!
-                constructorDefinition << "{ ; }";
+                // signature + initializer list + no body
+                constructorDefinition << indent << definition.name << "(const " << definition.name << "_proxy& other)\n";
+                constructorDefinition << generateConstructorInitializerList(definition, std::string("other"), insideClassIndent + 1);
+                constructorDefinition << indent << "{ ; }";
             }
+            constructorDefinition << "\n";
 
             return constructorDefinition.str();
         }
@@ -478,76 +497,215 @@ namespace TRAFO_NAMESPACE
             if (!candidate.get()) return;
 
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
-            const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
+            clang::ASTContext& context = declaration.getASTContext();
+            const clang::SourceManager& sourceManager = declaration.getSourceManager();
+            const clang::FileID fileId = declaration.fileId;
 
-            // insert proxy class forward declaration   
-            rewriter.insert(declaration.sourceRange.getBegin(), generateProxyClassDeclaration(declaration) + std::string("\n\n"), true, true);
-
+            // insert proxy class forward declaration
+            rewriter.insert(getBeginOfLine(declaration.sourceRange.getBegin(), context), generateProxyClassDeclaration(declaration));
+            
             // add constructors with proxy class arguments
+            const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
             for (const auto& definition : definitions)
             {
                 // insert using statement into class definition
-                rewriter.insert(definition.innerLocBegin, std::string("\n") + generateUsingStmt(definition, "\t") + std::string(";"), true, true);
+                const std::string usingStmt = generateProxyClassUsingStmt(definition);
+                rewriter.insert(definition.innerSourceRange.getBegin(), usingStmt);
                 
                 // insert constructor: in case of a C++ class, there must be at least one public access specifier
                 // as we require proxy class candidates have at least one public field!
-                std::string prefix("\n");
                 clang::SourceLocation sourceLocation;
                 if (definition.hasCopyConstructor)
                 {
-                    sourceLocation = definition.copyConstructor->sourceRange.getEnd().getLocWithOffset(1);
+                    const std::uint32_t lineEOD = context.getFullLoc(definition.copyConstructor->sourceRange.getEnd()).getSpellingLineNumber();
+                    sourceLocation = sourceManager.translateLineCol(fileId, lineEOD + 1, 1);
                 }
                 else if (definition.ptrPublicConstructors.size() > 0)
                 {
-                    sourceLocation = definition.ptrPublicConstructors.back()->sourceRange.getEnd().getLocWithOffset(1);
+                    const std::uint32_t lineEOD = context.getFullLoc(definition.ptrPublicConstructors.back()->sourceRange.getEnd()).getSpellingLineNumber();
+                    sourceLocation = sourceManager.translateLineCol(fileId, lineEOD + 1, 1);
                 }
                 else if (definition.publicAccess)
                 {
                     sourceLocation = definition.publicAccess->scopeBegin;
-                    prefix += std::string("\t");
 
                 }
                 else if (definition.declaration.isStruct)
                 {
-                    sourceLocation = definition.innerLocBegin;
-                    prefix += std::string("\t");
+                    sourceLocation = definition.innerSourceRange.getBegin();
                 }
-
-                rewriter.insert(sourceLocation, prefix + generateConstructorClassFromProxyClass(definition), true, true);
+                rewriter.insert(sourceLocation, generateConstructorClassFromProxyClass(definition));
             }
-
+            
             // insert include line outside the outermost namespace or after the last class definition if there is no namespace
-            const std::string includeLine = std::string("\n\n#include \"autogen_") + candidate->name + std::string("_proxy.hpp\"");
-            const clang::SourceRange sourceRange = (declaration.namespaces.size() > 0 ? declaration.namespaces.front().sourceRange : definitions.back().sourceRange);
-            const clang::SourceLocation sourceLocation = sourceRange.getEnd().getLocWithOffset(1);
-            rewriter.insert(sourceLocation, includeLine, true, true);
+            std::stringstream includeLine;
+            includeLine << "\n#include \"autogen_" << candidate->name << "_proxy.hpp\"\n";
+            rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), includeLine.str());
         }
 
-        void generateProxyClassDefinition(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter, clang::ASTContext& context, const std::string header = std::string(""))
+        std::string generateProxyClassConstructor(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        {
+            std::stringstream constructor;
+            constructor << indent << definition.name << "_proxy(";
+            constructor << definition.ptrPublicFields[0]->typeName << "* ptr, const std::size_t n";
+            if (definition.fields.size() > definition.ptrPublicFields.size())
+            {
+                for (const auto& field : definition.fields)
+                {
+                    if (!field.isPublic)
+                    {
+                        constructor <<  ", " << field.typeName << " " << field.name;
+                    }
+                }
+            }
+            constructor << ")\n";
+            constructor << indent << ":\n";
+
+            const std::uint32_t numFields = definition.fields.size();
+            std::uint32_t publicFieldId = 0;
+            std::uint32_t fieldId = 0;
+            for (const auto& field : definition.fields)
+            {
+                if (field.isPublic)
+                {
+                    constructor << indent << field.name << "(ptr[" << std::to_string(publicFieldId) <<" * n]";
+                    ++publicFieldId;
+                }
+                else
+                {
+                    constructor << indent << field.name << "(" << field.name;
+                }
+
+                constructor << ((fieldId + 1) == numFields ? ")," : ")") << "\n";
+                ++fieldId;
+            }
+            constructor << indent << "{ ; }";
+            
+            return constructor.str();
+        }
+
+        std::string generateProxyClassCopyConstructor(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        {
+            std::stringstream constructor;
+
+            constructor << indent << definition.name << "_proxy(" << definition.name << "& rhs)\n";
+            constructor << indent << generateConstructorInitializerList(definition, std::string("rhs"), Indentation(0, 0)) << "\n";
+            constructor << indent << "{ ; }";
+
+            return constructor.str();
+        }
+
+        void generateProxyClassDefinition(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter, const std::string header = std::string(""))
         {
             if (!candidate.get()) return;
 
-            candidate->printInfo();
+            // some file related locations
+            const clang::SourceManager& sourceManager = candidate->sourceManager;
+            const clang::FileID fileId = candidate->getDeclaration().fileId;
+            const clang::SourceLocation fileStart = sourceManager.getLocForStartOfFile(fileId);
+            const clang::SourceLocation fileEnd = sourceManager.getLocForEndOfFile(fileId);
 
-            const clang::SourceManager& sourceManager = context.getSourceManager();
+            // declarations for which proxy equivalents need to be generated
+            const std::uint32_t numRelevantSourceRanges = candidate->relevantSourceRanges.size(); // is at least 1
+            ClassMetaData::SourceRangeSet::const_iterator sourceRange = candidate->relevantSourceRanges.cbegin();
+
+            // replace header
+            const clang::SourceRange fileStartToFirstDeclBegin(fileStart, sourceRange->getBegin().getLocWithOffset(-1));
+            if (fileStartToFirstDeclBegin.isValid())
+            { 
+                rewriter.replace(fileStartToFirstDeclBegin, header);
+            }
+
+            // remove everything that is not relevant for the proxy generation
+            for (std::uint32_t i = 0; i < (numRelevantSourceRanges - 1); ++i)
+            {
+                const clang::SourceLocation start = sourceRange->getEnd().getLocWithOffset(1);
+                const clang::SourceLocation end = (++sourceRange)->getBegin().getLocWithOffset(-1);
+                const clang::SourceRange toBeRemoved(start, end);
+                if (toBeRemoved.isValid())
+                {
+                    rewriter.remove(toBeRemoved);
+                }
+            }            
+
+            const clang::SourceRange toBeRemoved(sourceRange->getEnd().getLocWithOffset(1), fileEnd);
+            if (toBeRemoved.isValid())
+            {
+                rewriter.replace(toBeRemoved, std::string("\n"));
+            }
+
+            // declaration: replace class name by proxy class name
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
+            if (!declaration.isDefinition)
+            {
+                rewriter.replace(declaration.nameSourceRange, declaration.name + std::string("_proxy"));
+            }
+
+            // definitions
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
+            for (const auto& definition : definitions)
+            {
+                // replace class name by proxy class name
+                rewriter.replace(definition.nameSourceRange, definition.name + std::string("_proxy"));
 
-            // remove everything outside the outer namespace
-            const bool hasNamespaces = declaration.namespaces.size() > 0;
-            const std::string headerEpilogue = std::string(header.empty() ? "" : "\n\n") + std::string(hasNamespaces ? "namespace" : "");
-            const clang::SourceLocation fileStart = sourceManager.getLocForStartOfFile(sourceManager.getFileID(candidate->getSourceLocation()));
-            const clang::SourceLocation declStart = (hasNamespaces ? declaration.namespaces.front().sourceRange.getBegin() : candidate->getSourceLocation());
-            const clang::SourceLocation declEnd = (hasNamespaces ? declaration.namespaces.front().sourceRange : definitions.back().sourceRange).getEnd().getLocWithOffset(1);
-            const clang::SourceLocation fileEnd = sourceManager.getLocForEndOfFile(sourceManager.getFileID(candidate->getSourceLocation()));
-            const clang::SourceRange fileStartToDecl(fileStart, declStart);
-            const clang::SourceRange declToFileEnd(declEnd, fileEnd);
+                continue;
 
-            rewriter.replace(fileStartToDecl, header + headerEpilogue);
-            rewriter.replace(declToFileEnd, std::string("\n"));
+                // insert using stmt
+                std::stringstream usingStmt;
+                if (definition.isTemplatePartialSpecialization)
+                {
+                    for (const auto& templateArgument : definition.templatePartialSpecializationArguments)
+                    {
+                        const std::string templateArgumentName = templateArgument.first;
+                        const bool isTypeParameter = templateArgument.second;
+                        if (isTypeParameter)
+                        {
+                            usingStmt << "using nonconst_" << templateArgumentName << " = typename std::remove_const<" << templateArgumentName << ">::type;\n\t";
+                        }
+                    }
+                }
+                else
+                {
+                    for (const auto& templateParameter : definition.declaration.templateParameters)
+                    {
+                        const std::string templateArgumentName = templateParameter.name;
+                        const bool isTemplateTypeParmType = templateParameter.isTypeParameter;
+                        if (isTemplateTypeParmType)
+                        {
+                            usingStmt << "using nonconst_" << templateArgumentName << " = typename std::remove_const<" << templateArgumentName << ">::type;\n\t";
+                        }
+                    }
+                }
+                usingStmt << "using " << definition.name << " = " << definition.declaration.namespaceString << definition.name;
+                if (definition.isTemplatePartialSpecialization)
+                {
+                    usingStmt << "<" << concat(definition.getTemplatePartialSpecializationArgumentNames("nonconst_"), std::string(", ")) << ">";
+                }
+                else if (definition.declaration.templateParameters.size() > 0)
+                {
+                    usingStmt << "<" << concat(definition.declaration.getTemplateParameterNames("nonconst_"), std::string(", ")) << ">";
+                }
+                usingStmt << ";";
+                rewriter.insert(definition.innerLocBegin, std::string("\n\t") + usingStmt.str(), true, true);
+               
+                // standard constructor
+                std::vector<std::string> proxyClassConstructors;
+                proxyClassConstructors.emplace_back(generateProxyClassConstructor(definition, std::string("\t")));
+                proxyClassConstructors.emplace_back(generateProxyClassCopyConstructor(definition, std::string("\t")));
 
-            // remove all declarations / definitions that are not instantiated
-
+                const std::uint32_t numConstructorsToBeInserted = proxyClassConstructors.size();
+                const std::uint32_t numConstructorLocationsAvailable = definition.ptrPublicConstructors.size();
+                const std::uint32_t numConstructorsInserted = std::min(numConstructorLocationsAvailable, numConstructorsToBeInserted);
+                for (std::uint32_t i = 0; i < numConstructorsInserted; ++i)
+                {
+                    rewriter.replace(definition.ptrPublicConstructors[i]->sourceRange, proxyClassConstructors[i]);
+                }
+                const clang::SourceLocation fallbackSourceLocation = (definition.publicAccess ? definition.publicAccess->scopeBegin : definition.innerLocBegin);
+                for (std::uint32_t i = numConstructorsInserted; i < proxyClassConstructors.size(); ++i)
+                {
+                    rewriter.insert(fallbackSourceLocation, std::string("\n") + proxyClassConstructors[i]);
+                }
+            }
         }
         
         void addProxyClassToSource(const std::vector<std::unique_ptr<ClassMetaData>>& proxyClassTargets, clang::ASTContext& context)
@@ -559,19 +717,23 @@ namespace TRAFO_NAMESPACE
             {
                 if (!target->containsProxyClassCandidates) continue;
 
+                std::cout << "########################################################" << std::endl;
+
+                target->printInfo();
+
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);
 
                 // TODO: replace by writing back to file!
-                rewriter.getEditBuffer(rewriter.getSourceManager().getFileID(target->getSourceLocation())).write(llvm::outs());
+                rewriter.getEditBuffer(target->fileId).write(llvm::outs());
 
                 std::cout << "########################################################" << std::endl;
 
                 // generate proxy class definition
-                generateProxyClassDefinition(target, proxyClassCreator, context, std::string("// my header"));
+                generateProxyClassDefinition(target, proxyClassCreator, std::string("// my header\n"));
 
                 // TODO: replace by writing back to file!
-                proxyClassCreator.getEditBuffer(proxyClassCreator.getSourceManager().getFileID(target->getSourceLocation())).write(llvm::outs());
+                proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
                 
                 std::cout << "########################################################" << std::endl;
             }
@@ -612,9 +774,9 @@ namespace TRAFO_NAMESPACE
             //rewriter.getEditBuffer(rewriter.getSourceMgr().getMainFileID()).write(llvm::outs());
         }
         
-        std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& ci, llvm::StringRef file) override
+        std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compilerInstance, llvm::StringRef file) override
         {
-            rewriter.setSourceMgr(ci.getSourceManager(), ci.getLangOpts());
+            rewriter.setSourceMgr(compilerInstance.getSourceManager(), compilerInstance.getLangOpts());
             return llvm::make_unique<InsertProxyClassImplementation>(rewriter);
         }
     };
