@@ -6,9 +6,11 @@
 #if !defined(MISC_AST_HELPER_HPP)
 #define MISC_AST_HELPER_HPP
 
-#include <string>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <clang/AST/AST.h>
+#include <clang/Lex/Preprocessor.h>
 #include <misc/string_helper.hpp>
 
 #if !defined(TRAFO_NAMESPACE)
@@ -158,6 +160,28 @@ namespace TRAFO_NAMESPACE
             const clang::SourceLocation colonLocation = getLocationOfFirstOccurence(sourceRange, context, character, (lineEnd - lineBegin), columnEnd);
 
             return clang::SourceRange(withIndentation ? beginLocation : getBeginOfLine(beginLocation, context), colonLocation);
+        }
+
+        static bool mightBeMacroExpansion(const clang::NamedDecl& decl)
+        {
+            clang::ASTContext& context = decl.getASTContext();
+            const std::uint32_t declSpellingLineNumber = context.getFullLoc(decl.getBeginLoc()).getSpellingLineNumber();
+            const std::uint32_t declExpansionLineNumber = context.getFullLoc(decl.getBeginLoc()).getExpansionLineNumber();
+
+            return (declSpellingLineNumber != declExpansionLineNumber);
+        }
+
+        static std::string getNameBeforeMacroExpansion(const clang::NamedDecl& decl, const std::shared_ptr<clang::Preprocessor>& preprocessor)
+        {
+            const std::string name = decl.getNameAsString();
+
+            if (mightBeMacroExpansion(decl) && preprocessor.get())
+            {
+                const std::string nameBeforeMacroExpansion = preprocessor->getImmediateMacroName(decl.getLocation());
+                if (nameBeforeMacroExpansion != std::string("")) return nameBeforeMacroExpansion;
+            }
+            
+            return name;
         }
     }
 }

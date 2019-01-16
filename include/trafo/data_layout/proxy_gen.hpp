@@ -12,19 +12,20 @@
 #include <set>
 #include <vector>
 
+#include <clang/AST/ASTConsumer.h>
+#include <clang/AST/ASTContext.h>
+#include <clang/Lex/Preprocessor.h>
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/FrontendActions.h>
+#include <clang/Tooling/CommonOptionsParser.h>
+#include <clang/Tooling/Tooling.h>
+
 #include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
 #include <misc/rewriter.hpp>
 #include <misc/string_helper.hpp>
 #include <trafo/data_layout/class_meta_data.hpp>
 #include <trafo/data_layout/variable_declaration.hpp>
-
-#include <clang/AST/ASTConsumer.h>
-#include <clang/AST/ASTContext.h>
-#include <clang/Frontend/CompilerInstance.h>
-#include <clang/Frontend/FrontendActions.h>
-#include <clang/Tooling/CommonOptionsParser.h>
-#include <clang/Tooling/Tooling.h>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -243,6 +244,7 @@ namespace TRAFO_NAMESPACE
     class InsertProxyClassImplementation : public clang::ASTConsumer
     {
         Rewriter rewriter;
+        static std::shared_ptr<clang::Preprocessor> preprocessor;
         
         std::vector<ContainerDeclaration> containerDeclarations;
         std::set<std::string> proxyClassTargetNames;
@@ -422,6 +424,7 @@ namespace TRAFO_NAMESPACE
             const std::string indent(insideClassIndent.value, ' ');
             std::stringstream usingStmt;
 
+            /*
             usingStmt << indent << "using " << definition.name << "_proxy = " << definition.declaration.namespaceString << "proxy_internal::" << definition.name << "_proxy";
             if (definition.isTemplatePartialSpecialization)
             {
@@ -429,9 +432,12 @@ namespace TRAFO_NAMESPACE
             }
             else if (definition.declaration.templateParameters.size() > 0)
             {
-                usingStmt << "<" << concat(definition.declaration.getTemplateParameterNames(), std::string(", ")) << ">";
+                usingStmt << definition.declaration.templateParameterString;
             }
             usingStmt << ";\n";
+            */
+            usingStmt << indent << "using " << definition.name << "_proxy = " << definition.declaration.namespaceString << "proxy_internal::" << definition.name << "_proxy";
+            usingStmt << definition.templateParameterString << ";\n";
 
             return usingStmt.str();
         }
@@ -738,13 +744,22 @@ namespace TRAFO_NAMESPACE
                 std::cout << "########################################################" << std::endl;
             }
         }
-        
+
     public:
         
         InsertProxyClassImplementation(clang::Rewriter& clangRewriter)
             :
             rewriter(clangRewriter)
         { ; }
+
+        static void registerPreprocessor(std::shared_ptr<clang::Preprocessor> preprocessor)
+        {
+            if (!InsertProxyClassImplementation::preprocessor.get())
+            {
+                InsertProxyClassImplementation::preprocessor = preprocessor;
+                ClassMetaData::registerPreprocessor(preprocessor);
+            }
+        }
 
         void HandleTranslationUnit(clang::ASTContext& context) override
         {	
@@ -761,6 +776,8 @@ namespace TRAFO_NAMESPACE
         }
     };
 
+    std::shared_ptr<clang::Preprocessor> InsertProxyClassImplementation::preprocessor;
+
     class InsertProxyClass : public clang::ASTFrontendAction
     {
         clang::Rewriter rewriter;
@@ -776,6 +793,11 @@ namespace TRAFO_NAMESPACE
         
         std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compilerInstance, llvm::StringRef file) override
         {
+            if (compilerInstance.hasPreprocessor())
+            {
+                InsertProxyClassImplementation::registerPreprocessor(compilerInstance.getPreprocessorPtr());
+            }
+
             rewriter.setSourceMgr(compilerInstance.getSourceManager(), compilerInstance.getLangOpts());
             return llvm::make_unique<InsertProxyClassImplementation>(rewriter);
         }

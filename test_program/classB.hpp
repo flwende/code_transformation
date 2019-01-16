@@ -23,6 +23,16 @@ namespace fw
             B(const T value) : dummy(1), v(value), w(value) { ; }
             B(const B& rhs) : dummy(rhs.dummy), v(rhs.v), w(rhs.w) { ; }
 
+        #define MACRO(OP, IN_T)                     \
+        inline void operator OP (const IN_T& rhs)   \
+        {                                           \
+            v OP rhs.v;                             \
+            w OP rhs.w;                             \
+        }
+        MACRO(+=, B)
+        MACRO(-=, B)
+        #undef MACRO
+
             B& operator=(const T value)
             {
                 v = value;

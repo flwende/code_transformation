@@ -8,13 +8,13 @@
 
 #include <iostream>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
 #include <misc/rewriter.hpp>
 #include <misc/string_helper.hpp>
-
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -158,6 +158,49 @@ namespace TRAFO_NAMESPACE
 
             class TemplateParameter
             {
+                static std::string getArgumentName(const clang::TemplateArgument& arg, const std::vector<const TemplateParameter*>& typeParameters, const bool internalRepresentation = false, bool* isTypeParameter = nullptr)
+                {
+                    std::string argName("ERROR");
+                    
+                    if (isTypeParameter)
+                    {
+                        *isTypeParameter = false;
+                    }
+
+                    if (arg.getKind() == clang::TemplateArgument::ArgKind::Type)
+                    {
+                        const clang::QualType argQualType = arg.getAsType();
+                        argName = argQualType.getAsString();
+
+                        if (!internalRepresentation)
+                        {
+                            if (const clang::Type* const argType = argQualType.getTypePtrOrNull())
+                            {
+                                if (argType->isTemplateTypeParmType())
+                                {
+                                    const std::uint32_t argNameTypeId = std::atoi(argName.substr(argName.rfind('-') + 1).c_str());
+
+                                    if (argNameTypeId < typeParameters.size())
+                                    {
+                                        argName = typeParameters[argNameTypeId]->name;
+                                    }
+
+                                    if (isTypeParameter)
+                                    {
+                                        *isTypeParameter = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (arg.getKind() == clang::TemplateArgument::ArgKind::Integral)
+                    {
+                        argName = std::to_string(arg.getAsIntegral().getExtValue());
+                    }
+
+                    return argName;
+                };
+
             public:
 
                 const clang::NamedDecl& decl;
@@ -209,43 +252,40 @@ namespace TRAFO_NAMESPACE
                     return templateParameters;
                 }
 
-                static std::vector<std::pair<std::string, bool>> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, const clang::SourceManager& sourceManager, const std::vector<const TemplateParameter*>& typeParameters)
+                static std::string getPartialSpecializationArgumentString(const clang::CXXRecordDecl& decl, const std::vector<const TemplateParameter*>& typeParameters, const bool internalRepresentation = false)
+                {
+                    std::stringstream templateArgumentStringStream;
+
+                    if (const clang::ClassTemplatePartialSpecializationDecl* const tpsDecl = reinterpret_cast<const clang::ClassTemplatePartialSpecializationDecl* const>(&decl))
+                    {
+                        const clang::TemplateArgumentList& args = tpsDecl->getTemplateArgs();
+
+                        if (const std::uint32_t iMax = args.size())
+                        {
+                            templateArgumentStringStream << "<";
+                            for (std::uint32_t i = 0; i < iMax; ++i)
+                            {
+                                const std::string argName = getArgumentName(args[i], typeParameters, internalRepresentation);
+                                templateArgumentStringStream << argName << ((i + 1) < iMax ? ", " : ">");
+                            }
+                        }   
+                    }
+
+                    return templateArgumentStringStream.str();
+                }
+
+                static std::vector<std::pair<std::string, bool>> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, const std::vector<const TemplateParameter*>& typeParameters)
                 {
                     std::vector<std::pair<std::string, bool>> argNames;                   
 
                     if (const clang::ClassTemplatePartialSpecializationDecl* const tpsDecl = reinterpret_cast<const clang::ClassTemplatePartialSpecializationDecl* const>(&decl))
                     {
                         const clang::TemplateArgumentList& args = tpsDecl->getTemplateArgs();
-
-                        for (std::size_t i = 0, iMax = args.size(); i < iMax; ++i)
+                        for (std::uint32_t i = 0, iMax = args.size(); i < iMax; ++i)
                         {
-                            std::string argName("\"TemplateParameter::getPartialSpecializationArguments() needs to be extended\"");                            
-                            bool argHasTemplateTypeParmType = false;
-
-                            if (args[i].getKind() == clang::TemplateArgument::ArgKind::Type)
-                            {
-                                const clang::QualType argQualType = args[i].getAsType();
-                                argName = argQualType.getAsString();
-
-                                if (const clang::Type* const argType = argQualType.getTypePtrOrNull())
-                                {
-                                    if (argHasTemplateTypeParmType = argType->isTemplateTypeParmType())
-                                    {
-                                        const std::uint32_t argNameTypeId = std::atoi(argName.substr(argName.rfind('-') + 1).c_str());
-
-                                        if (argNameTypeId < typeParameters.size())
-                                        {
-                                            argName = typeParameters[argNameTypeId]->name;
-                                        }
-                                    }
-                                }
-                            }
-                            else if (args[i].getKind() == clang::TemplateArgument::ArgKind::Integral)
-                            {
-                                argName = std::to_string(args[i].getAsIntegral().getExtValue());
-                            }
-
-                            argNames.push_back(std::make_pair(argName, argHasTemplateTypeParmType));
+                            bool isTypeParameter = false;
+                            const std::string argName = getArgumentName(args[i], typeParameters, false, &isTypeParameter);
+                            argNames.push_back(std::make_pair(argName, isTypeParameter));
                         }   
                     }
 
@@ -275,7 +315,7 @@ namespace TRAFO_NAMESPACE
                     :
                     decl(decl),
                     sourceRange(decl.getSourceRange()),
-                    name(decl.getNameAsString()),
+                    name(getNameBeforeMacroExpansion(decl, ClassMetaData::preprocessor)),
                     scopeBegin(getLocationOfFirstOccurence(sourceRange, decl.getASTContext(), '{')),
                     scopeEnd(decl.getRBraceLoc())
                 { ; }
@@ -327,7 +367,21 @@ namespace TRAFO_NAMESPACE
 
                     return templateTypeParameters;
                 }
+                
+                std::string getTemplateParamerString() const
+                {
+                    std::stringstream templateParameterStringStream;
+                    const std::uint32_t numTemplateParameters = templateParameters.size();
+                    
+                    templateParameterStringStream << "<";
+                    for (std::uint32_t i = 0; i < numTemplateParameters; ++i)
+                    {
+                        templateParameterStringStream << templateParameters[i].name << ((i + 1) < numTemplateParameters ? ", " : ">");
+                    }
 
+                    return templateParameterStringStream.str();
+                }
+                
                 const clang::CXXRecordDecl* const cxxRecordDecl;
                 const clang::ClassTemplateDecl* const classTemplateDecl;
                 clang::ASTContext& context;
@@ -346,6 +400,7 @@ namespace TRAFO_NAMESPACE
                 const std::vector<TemplateParameter> templateParameters;
                 const std::vector<const TemplateParameter*> templateTypeParameters;
                 const clang::SourceRange templateParameterListSourceRange;
+                const std::string templateParameterString;
                 const bool isDefinition;
                 const bool isStruct;
                 const bool isClass;
@@ -369,6 +424,7 @@ namespace TRAFO_NAMESPACE
                     templateParameters(TemplateParameter::getParametersFromDecl(classTemplateDecl, sourceManager)),
                     templateTypeParameters(getTemplateTypeParameters()),
                     templateParameterListSourceRange(TemplateParameter::getParameterListSourceRange(classTemplateDecl)),
+                    templateParameterString(getTemplateParamerString()),
                     isDefinition(isDefinition),
                     isStruct(cxxRecordDecl->isStruct()),
                     isClass(cxxRecordDecl->isClass()),
@@ -438,6 +494,7 @@ namespace TRAFO_NAMESPACE
                     if (templateParameters.size() > 0)
                     {
                         std::cout << indent << "\t+-> template parameter list range: " << templateParameterListSourceRange.printToString(sourceManager) << std::endl;
+                        std::cout << indent << "\t|\t* as string: " << templateParameterString << std::endl;
                         for (const auto& parameter : templateParameters)
                         {
                             parameter.printInfo(sourceManager, indent + std::string("\t|\t"));
@@ -503,7 +560,9 @@ namespace TRAFO_NAMESPACE
                 const std::string name;   
                 const clang::SourceRange nameSourceRange;             
                 const bool isTemplatePartialSpecialization;
-                const std::vector<std::pair<std::string, bool>> templatePartialSpecializationArguments;          
+                const std::string templateParameterString;
+                const std::string templateParameterStringInternal;
+                const std::vector<std::pair<std::string, bool>> templatePartialSpecializationArguments;
                 std::vector<Field> fields;
                 std::vector<const Field*> ptrPublicFields;
                 std::vector<const Field*> ptrProtectedFields;
@@ -537,7 +596,9 @@ namespace TRAFO_NAMESPACE
                     name(decl.getNameAsString()),
                     nameSourceRange(decl.getLocation()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
-                    templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, sourceManager, declaration.templateTypeParameters) : std::vector<std::pair<std::string, bool>>()),
+                    templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateTypeParameters) : declaration.templateParameterString),
+                    templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateTypeParameters, true) : declaration.templateParameterString),
+                    templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateTypeParameters) : std::vector<std::pair<std::string, bool>>()),
                     publicAccess(nullptr),
                     protectedAccess(nullptr),
                     privateAccess(nullptr),
@@ -640,6 +701,45 @@ namespace TRAFO_NAMESPACE
                                 }
                             }
                         }
+
+                        /*
+                        const std::string className = name + templateParameterString;
+                        const std::string classNameRef = className + std::string(" &");
+                        const std::string classNamePtr = className + std::string(" *");
+                        const std::string constClassName = std::string("const ") + className;
+                        const std::string constClassNameRef = std::string("const ") + className;
+                        const std::string constClassNameRRef = std::string("const ") + className;
+                        */
+                        const std::string className = name + templateParameterString;
+                        const std::string classNameInternal = name + templateParameterStringInternal;
+
+                        for (const auto& method : decl.methods())
+                        {
+                            const clang::DeclarationName::NameKind kind = method->getDeclName().getNameKind();
+                            if (kind == clang::DeclarationName::NameKind::CXXConstructorName || kind == clang::DeclarationName::NameKind::CXXDestructorName) continue;
+
+                            const clang::SourceRange sourceRange = method->getSourceRange();
+                            const std::uint32_t beginLine = getSpellingLineNumber(sourceRange.getBegin(), context);
+                            const std::uint32_t endLine = getSpellingLineNumber(sourceRange.getEnd(), context);
+                            const clang::SourceLocation begin = sourceManager.translateLineCol(declaration.fileId, beginLine, 1);
+                            const clang::SourceLocation end = sourceManager.translateLineCol(declaration.fileId, endLine, 1);
+                            
+                            std::cout << "Method in class/struct " << name << ": " << getNameBeforeMacroExpansion(*method, ClassMetaData::preprocessor) << std::endl;
+                            std::cout << "\t+-> range: " << method->getSourceRange().printToString(sourceManager) << std::endl;
+                            std::cout << "\t+-> macro expansion: " << (mightBeMacroExpansion(*method) ? "maybe" : "no") << std::endl;
+                            std::cout << "\t+-> body: " << std::endl << dumpSourceRangeToString(clang::SourceRange(begin, end), sourceManager) << std::endl;
+                            for (const auto& param : method->parameters())
+                            {
+                                const clang::QualType qualType = param->getType().getLocalUnqualifiedType();
+                                std::string typeName = qualType.getAsString();
+
+                                if (typeName.find(className) != std::string::npos || typeName.find(classNameInternal) != std::string::npos)
+                                {
+                                    typeName = name;
+                                }
+                                std::cout << "\t+-> arg: " << param->getNameAsString() << ", " << typeName << std::endl;
+                            }
+                        }
                     }
                 }
 
@@ -675,15 +775,7 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "\t+-> is template (partial) specialization: " << (isTemplatePartialSpecialization ? "yes" : "no") << std::endl;
                     if (isTemplatePartialSpecialization)
                     {
-                        const std::uint32_t numArgument = templatePartialSpecializationArguments.size();
-                        std::uint32_t argumentId = 0;
-
-                        std::cout << indent << "\t|\t* arguments: <";
-                        for (const auto& argument : templatePartialSpecializationArguments)
-                        {
-                            std::cout << argument.first << (++argumentId < numArgument ? ", " : ">");
-                        }
-                        std::cout << std::endl;
+                        std::cout << indent << "\t|\t* arguments: " << templateParameterString << " (internal: " << templateParameterStringInternal << ")" << std::endl;
                     }
                     
                     if (accessSpecifiers.size() > 0)
@@ -715,6 +807,7 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
+            //clang::Preprocessor& preprocessor;
             clang::ASTContext& context;
             const clang::SourceManager& sourceManager;
             const clang::FileID fileId;
@@ -723,12 +816,14 @@ namespace TRAFO_NAMESPACE
             clang::SourceLocation topMostSourceLocation;
             clang::SourceLocation bottomMostSourceLocation;
             SourceRangeSet relevantSourceRanges;
-            
+        
         protected:
+
+            static std::shared_ptr<clang::Preprocessor> preprocessor;
 
             template <typename T>
             ClassMetaData(const T& decl)
-                :          
+                :
                 context(decl.getASTContext()),
                 sourceManager(context.getSourceManager()),
                 fileId(sourceManager.getFileID(decl.getLocation())),
@@ -738,9 +833,23 @@ namespace TRAFO_NAMESPACE
                 bottomMostSourceLocation(sourceManager.getLocForStartOfFile(fileId))
             { ; }
 
-
-
         public:
+
+            static void registerPreprocessor(std::shared_ptr<clang::Preprocessor> preprocessor)
+            {
+                if (!ClassMetaData::preprocessor.get())
+                {
+                    ClassMetaData::preprocessor = preprocessor;
+                    //std::cout << preprocessor->getPredefines() << std::endl;
+                    /*
+                    clang::IdentifierTable& idTab = preprocessor->getIdentifierTable();
+                    for (auto it = idTab.begin(); it != idTab.end(); ++it)
+                    {
+                        std::cout << "IDTAB: " << it->first().str() << std::endl;
+                    }
+                    */
+                }
+            }
 
             virtual bool isTemplated() const = 0;
 
@@ -752,6 +861,8 @@ namespace TRAFO_NAMESPACE
 
             virtual void printInfo(const std::string indent = std::string("")) const = 0;
         };
+
+        std::shared_ptr<clang::Preprocessor> ClassMetaData::preprocessor;
 
         class CXXClassMetaData : public ClassMetaData
         {
