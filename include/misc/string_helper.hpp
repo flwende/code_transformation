@@ -12,8 +12,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <clang/AST/AST.h>
-#include <clang/Lex/Lexer.h>
 
 #if !defined(TRAFO_NAMESPACE)
     #define TRAFO_NAMESPACE fw
@@ -23,81 +21,17 @@ namespace TRAFO_NAMESPACE
 {
     namespace internal
     {
-        static std::string dumpStmtToString(const clang::Stmt* const stmt, const clang::SourceManager& sourceManager)
+        bool findAndReplace(std::string& input, const std::string& findString, const std::string& replaceString)
         {
-            // return empty string if 'stmt' is invalid
-            if (!stmt) return std::string("");
+            const std::string::size_type pos = input.find(findString);
             
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
+            if (pos != std::string::npos)
+            {
+                input.replace(pos, findString.length(), replaceString);
+                return true;
+            }
 
-            // note: 'const' reference is casted away (looks like the signature of 'dump' is inappropriate)!
-            stmt->dump(streamBuffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'streamBuffer'
-            
-            return streamBuffer.str(); // get content of 'streamBuffer'
-        }
-
-        static std::string dumpDeclToString(const clang::Decl* const decl)
-        {
-            // return empty string if 'decl' is invalid
-            if (!decl) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            decl->dump(streamBuffer); // dump content of 'decl' to 'streamBuffer'
-
-            return streamBuffer.str(); // get content of 'streamBuffer'
-        }
-
-        static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
-        {
-            // return empty string if 'stmt' is invalid
-            if (!stmt) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            stmt->printPretty(streamBuffer, nullptr, clang::PrintingPolicy(langOpts), 0); // dump content of 'stmt' to 'streamBuffer'
-
-            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
-        }
-
-        static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const bool insertLeadingNewline)
-        {
-            return dumpStmtToStringHumanReadable(stmt, clang::LangOptions(), insertLeadingNewline);
-        }
-
-        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
-        {
-            // return empty string if 'decl' is invalid
-            if (!decl) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            decl->print(streamBuffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'streamBuffer'
-
-            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
-        }
-
-        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const bool insertLeadingNewline)
-        {
-            return dumpDeclToStringHumanReadable(decl, clang::LangOptions(), insertLeadingNewline);
-        }
-
-        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager, const clang::LangOptions& langOpts)
-        {
-            if (!sourceRange.isValid()) return std::string("");
-
-            const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sourceManager, langOpts);
-
-            return sourceText.str();
-        }
-
-        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager)
-        {
-            return dumpSourceRangeToString(sourceRange, sourceManager, clang::LangOptions());
+            return false;
         }
 
         static std::vector<std::string> splitString(const std::string& input, const char delimiter)
@@ -138,47 +72,6 @@ namespace TRAFO_NAMESPACE
             }
 
             return output;
-        }
-
-        struct Indentation
-        {
-            const std::uint32_t value;
-            const std::uint32_t increment;
-
-            Indentation(const std::uint32_t value, const std::uint32_t increment = 1)
-                :
-                value(value),
-                increment(increment)
-            { ; }
-
-            Indentation(const clang::Decl& decl, const std::uint32_t increment = 0)
-                :
-                value(decl.getASTContext().getFullLoc(decl.getSourceRange().getBegin()).getSpellingColumnNumber() - 1),
-                increment(increment > 0 ? increment : decl.getASTContext().getPrintingPolicy().Indentation)
-            { ; }
-
-            Indentation(const Indentation& indentation)
-                :
-                value(indentation.value),
-                increment(indentation.increment)
-            { ; }
-        };
-
-        Indentation operator+(const Indentation& indent, const std::uint32_t n)
-        {
-            return Indentation(indent.value + n * indent.increment, indent.increment);
-        }
-
-        Indentation operator-(const Indentation& indent, const std::uint32_t n)
-        {
-            if (indent.value < (n * indent.increment)) 
-            {
-                return Indentation(0, indent.increment);
-            }
-            else
-            {
-                return Indentation(indent.value - n * indent.increment, indent.increment);
-            }
         }
     }
 }

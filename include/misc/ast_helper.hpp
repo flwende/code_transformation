@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <clang/AST/AST.h>
+#include <clang/Lex/Lexer.h>
 #include <clang/Lex/Preprocessor.h>
 #include <misc/string_helper.hpp>
 
@@ -20,21 +21,7 @@
 namespace TRAFO_NAMESPACE
 {
     namespace internal
-    {
-        static std::string getDataTypeName(const clang::QualType& dataType)
-        {
-            if (const clang::Type* const type = dataType.getTypePtrOrNull())
-            {
-                if (type->isClassType() || type->isStructureType())
-                {
-                    const clang::CXXRecordDecl& decl = *(type->getAsCXXRecordDecl());
-                    return decl.getNameAsString();
-                }
-            }
-
-            return dataType.getAsString();
-        }
-
+    {  
         struct ClassDecl
         {
             static const clang::CXXRecordDecl* const getTemplatedDecl(const clang::CXXRecordDecl& decl)
@@ -76,10 +63,39 @@ namespace TRAFO_NAMESPACE
             return context.getFullLoc(sourceLocation).getSpellingColumnNumber();
         }
 
+        static std::uint32_t getExpansionLineNumber(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            return context.getFullLoc(sourceLocation).getExpansionLineNumber();
+        }
+
+        static std::uint32_t getExpansionColumnNumber(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            return context.getFullLoc(sourceLocation).getExpansionColumnNumber();
+        }
+
+        static clang::SourceLocation getSpellingSourceLocation(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            return context.getFullLoc(sourceLocation).getSpellingLoc();
+        }
+
+        static clang::SourceLocation getExpansionSourceLocation(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            return context.getFullLoc(sourceLocation).getExpansionLoc();
+        }
+
+        static clang::SourceRange getSpellingSourceRange(const clang::SourceRange& sourceRange, clang::ASTContext& context)
+        {
+            const clang::SourceLocation spellingBeginLoc = getSpellingSourceLocation(sourceRange.getBegin(), context);//context.getFullLoc(sourceRange.getBegin()).getSpellingLoc();
+            const clang::SourceLocation spellingEndLoc = getSpellingSourceLocation(sourceRange.getEnd(), context);//context.getFullLoc(sourceRange.getEnd()).getSpellingLoc();
+
+            return clang::SourceRange(spellingBeginLoc, spellingEndLoc);
+        }
+
         static clang::SourceLocation getBeginOfLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
-            const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
+            //const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
+            const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
             const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
 
             return sourceManager.translateLineCol(fileId, sourceLocationLineNumber, 1);
@@ -88,7 +104,8 @@ namespace TRAFO_NAMESPACE
         static clang::SourceLocation getNextLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
-            const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
+            //const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
+            const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
             const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
             const clang::SourceLocation nextLine = sourceManager.translateLineCol(fileId, sourceLocationLineNumber + 1, 1);
 
@@ -102,6 +119,93 @@ namespace TRAFO_NAMESPACE
             }
         }
 
+        /*
+        static std::string dumpStmtToString(const clang::Stmt* const stmt, const clang::SourceManager& sourceManager)
+        {
+            // return empty string if 'stmt' is invalid
+            if (!stmt) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
+
+            // note: 'const' reference is casted away (looks like the signature of 'dump' is inappropriate)!
+            stmt->dump(streamBuffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'streamBuffer'
+            
+            return streamBuffer.str(); // get content of 'streamBuffer'
+        }
+
+        static std::string dumpDeclToString(const clang::Decl* const decl)
+        {
+            // return empty string if 'decl' is invalid
+            if (!decl) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
+
+            decl->dump(streamBuffer); // dump content of 'decl' to 'streamBuffer'
+
+            return streamBuffer.str(); // get content of 'streamBuffer'
+        }
+
+        static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
+        {
+            // return empty string if 'stmt' is invalid
+            if (!stmt) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
+
+            stmt->printPretty(streamBuffer, nullptr, clang::PrintingPolicy(langOpts), 0); // dump content of 'stmt' to 'streamBuffer'
+
+            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
+        }
+
+        static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const bool insertLeadingNewline)
+        {
+            return dumpStmtToStringHumanReadable(stmt, clang::LangOptions(), insertLeadingNewline);
+        }
+
+        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
+        {
+            // return empty string if 'decl' is invalid
+            if (!decl) return std::string("");
+            
+            std::string buffer; // will hold the content
+            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
+
+            decl->print(streamBuffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'streamBuffer'
+
+            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
+        }
+
+        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const bool insertLeadingNewline)
+        {
+            return dumpDeclToStringHumanReadable(decl, clang::LangOptions(), insertLeadingNewline);
+        }
+        */
+
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager, const clang::LangOptions& langOpts)
+        {
+            if (!sourceRange.isValid()) return std::string("");
+
+            const llvm::StringRef sourceText = clang::Lexer::getSourceText(clang::CharSourceRange::getCharRange(sourceRange), sourceManager, langOpts);
+
+            return sourceText.str();
+        }
+
+        static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager)
+        {
+            return dumpSourceRangeToString(sourceRange, sourceManager, clang::LangOptions());
+        }
+        
+        static std::string dumpContainingLineToString(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            const clang::SourceLocation beginOfLine = getBeginOfLine(sourceLocation, context);
+            const clang::SourceLocation endOfLine = getNextLine(sourceLocation, context).getLocWithOffset(-1);
+
+            return dumpSourceRangeToString(clang::SourceRange(beginOfLine, endOfLine), context.getSourceManager());
+        }
+
         static clang::SourceLocation getLocationOfFirstOccurence(const clang::SourceRange& sourceRange, clang::ASTContext& context, const char character, const std::uint32_t lineOffset = 0, const std::uint32_t colOffset = 0)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
@@ -112,7 +216,8 @@ namespace TRAFO_NAMESPACE
             const std::uint32_t lineDecl = fullDeclSourceLocation.getSpellingLineNumber();
 
             // get full source location of FILE end
-            const clang::FileID fid = sourceManager.getFileID(declSourceLocation);
+            //const clang::FileID fid = sourceManager.getFileID(declSourceLocation);
+            const clang::FileID fid = sourceManager.getFileID(getSpellingSourceLocation(declSourceLocation, context));
             const clang::SourceLocation EOFLocation = sourceManager.getLocForEndOfFile(fid);
             const clang::FullSourceLoc fullEOFLocation = context.getFullLoc(EOFLocation);
             const std::uint32_t lineEOF = fullEOFLocation.getSpellingLineNumber();
@@ -162,26 +267,86 @@ namespace TRAFO_NAMESPACE
             return clang::SourceRange(withIndentation ? beginLocation : getBeginOfLine(beginLocation, context), colonLocation);
         }
 
-        static bool mightBeMacroExpansion(const clang::NamedDecl& decl)
+        static bool isThisAMacroExpansion(const clang::NamedDecl& decl)
         {
             clang::ASTContext& context = decl.getASTContext();
-            const std::uint32_t declSpellingLineNumber = context.getFullLoc(decl.getBeginLoc()).getSpellingLineNumber();
-            const std::uint32_t declExpansionLineNumber = context.getFullLoc(decl.getBeginLoc()).getExpansionLineNumber();
+            const std::uint32_t declSpellingLineNumberBegin = getSpellingLineNumber(decl.getBeginLoc(), context);
+            const std::uint32_t declExpansionLineNumberBegin = getExpansionLineNumber(decl.getBeginLoc(), context);
 
-            return (declSpellingLineNumber != declExpansionLineNumber);
+            if (declSpellingLineNumberBegin != declExpansionLineNumberBegin)
+            {
+                const clang::SourceManager& sourceManager = context.getSourceManager();
+                // use spellingLoc here to get the right fileId
+                //const clang::FileID fileId = sourceManager.getFileID(context.getFullLoc(decl.getBeginLoc()).getSpellingLoc());
+                const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(decl.getBeginLoc(), context));
+                
+                for (std::uint32_t i = declSpellingLineNumberBegin; i >= 0; --i)
+                {
+                    if (i == 0) return false;
+
+                    const clang::SourceLocation beginOfLine = sourceManager.translateLineCol(fileId, i, 1);
+                    const clang::SourceLocation endOfLine = sourceManager.translateLineCol(fileId, i + 1, 1).getLocWithOffset(-1);
+                    const std::string line = dumpSourceRangeToString(clang::SourceRange(beginOfLine, endOfLine), sourceManager);
+
+                    if (line.find(std::string("#define")) != std::string::npos) return true;
+                }
+            }
+
+            return false;
         }
 
         static std::string getNameBeforeMacroExpansion(const clang::NamedDecl& decl, const std::shared_ptr<clang::Preprocessor>& preprocessor)
         {
             const std::string name = decl.getNameAsString();
 
-            if (mightBeMacroExpansion(decl) && preprocessor.get())
+            if (isThisAMacroExpansion(decl) && preprocessor.get())
             {
                 const std::string nameBeforeMacroExpansion = preprocessor->getImmediateMacroName(decl.getLocation());
                 if (nameBeforeMacroExpansion != std::string("")) return nameBeforeMacroExpansion;
             }
             
             return name;
+        }
+
+        struct Indentation
+        {
+            const std::uint32_t value;
+            const std::uint32_t increment;
+
+            Indentation(const std::uint32_t value, const std::uint32_t increment = 1)
+                :
+                value(value),
+                increment(increment)
+            { ; }
+
+            Indentation(const clang::Decl& decl, const std::uint32_t increment = 0)
+                :
+                value(decl.getASTContext().getFullLoc(decl.getSourceRange().getBegin()).getSpellingColumnNumber() - 1),
+                increment(increment > 0 ? increment : decl.getASTContext().getPrintingPolicy().Indentation)
+            { ; }
+
+            Indentation(const Indentation& indentation)
+                :
+                value(indentation.value),
+                increment(indentation.increment)
+            { ; }
+        };
+
+        Indentation operator+(const Indentation& indent, const std::uint32_t n)
+        {
+            return Indentation(indent.value + n * indent.increment, indent.increment);
+        }
+
+        Indentation operator-(const Indentation& indent, const std::uint32_t n)
+        {
+            if (indent.value < (n * indent.increment)) 
+            {
+                return Indentation(0, indent.increment);
+            }
+            else
+            {
+                return Indentation(indent.value - n * indent.increment, indent.increment);
+            }
         }
     }
 }

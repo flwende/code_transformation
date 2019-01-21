@@ -18,8 +18,24 @@ namespace TRAFO_NAMESPACE
 {
     namespace internal
     {
-        struct Declaration
+        class Declaration
         {
+            std::string getDataTypeName(const clang::QualType& dataType)
+            {
+                if (const clang::Type* const type = dataType.getTypePtrOrNull())
+                {
+                    if (type->isClassType() || type->isStructureType())
+                    {
+                        const clang::CXXRecordDecl& decl = *(type->getAsCXXRecordDecl());
+                        return decl.getNameAsString();
+                    }
+                }
+
+                return dataType.getAsString();
+            }
+
+        public:
+
             const clang::VarDecl& decl;
             const clang::SourceRange sourceRange;
             const clang::QualType elementDataType;
@@ -46,9 +62,12 @@ namespace TRAFO_NAMESPACE
             }
         };
 
-        struct ContainerDeclaration : public Declaration
+        class ContainerDeclaration : public Declaration
         {
             using Base = Declaration;
+
+        public:
+
             using Base::decl;
             using Base::sourceRange;
             using Base::elementDataType;

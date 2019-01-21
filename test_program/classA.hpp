@@ -73,6 +73,7 @@ namespace MY_NAMESPACE
         }
 
         #define MACRO(OP, IN_T)                     \
+                                                    \
         inline void operator OP (const IN_T & rhs)  \
         {                                           \
             x OP rhs.x;                             \

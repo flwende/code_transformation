@@ -30,6 +30,9 @@ namespace TRAFO_NAMESPACE
 
             using SourceRangeSet = std::set<clang::SourceRange, CompareSourceRange>;
 
+            // forward declaration
+            class Definition;
+
         private:
 
             class AccessSpecifier
@@ -153,6 +156,139 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
                     std::cout << indent << "\t+-> has body: " << (decl.hasBody() ? "yes" : "no") << std::endl;
+                }
+            };
+
+            // forward declaration
+            class CXXMethod;
+
+            class FunctionArgument
+            {
+                clang::SourceRange getFunctionArgumentSourceRange(const clang::ParmVarDecl& decl)
+                {
+                    return getSpellingSourceRange(decl.getSourceRange(), decl.getASTContext());
+                }
+
+                bool isConstQualified(const clang::ParmVarDecl& decl)
+                {
+                    const clang::QualType qualType = decl.getType();
+
+                    if (qualType.isConstQualified()) return true;
+
+                    return (qualType.getAsString().find("const", 0, 5) != std::string::npos);
+                }
+
+                std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr)
+                {
+                    const clang::QualType qualType = decl.getType();
+                    std::string typeName = qualType.getAsString();
+
+                    if (definition)
+                    {
+                        const std::string className = definition->name + definition->templateParameterString;
+                        const std::string classNameInternal = definition->name + definition->templateParameterStringInternal;
+
+                        if (!findAndReplace(typeName, className, definition->name))
+                        {
+                            findAndReplace(typeName, classNameInternal, definition->name);
+                        }
+                    }
+
+                    return typeName;
+                }
+
+            public:
+
+                const clang::ParmVarDecl& decl;
+                const clang::SourceRange sourceRange;
+                const std::string name;
+                const std::string typeName;
+                const bool isConst;
+
+                FunctionArgument(const clang::ParmVarDecl& decl, const Definition* definition = nullptr)
+                    :
+                    decl(decl),
+                    sourceRange(getSpellingSourceRange(decl.getSourceRange(), decl.getASTContext())),
+                    name(decl.getNameAsString()),
+                    typeName(getTypeName(decl, definition)),
+                    isConst(isConstQualified(decl))
+                { ; }
+
+                static std::vector<FunctionArgument> getArgumentsFromDecl(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
+                {
+                    std::vector<FunctionArgument> arguments;
+
+                    for (const auto param : decl.parameters())
+                    {
+                        arguments.emplace_back(*param, definition);
+                    }
+
+                    return arguments;
+                }
+
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
+                {
+                    std::cout << indent << "* name=" << name << ", type=" << typeName << (isConst ? " (const qualified)" : "") << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                }
+            };
+
+            class CXXMethod
+            {
+                friend class FunctionArgument;
+
+                std::string getClassName(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
+                {
+                    if (definition)
+                    {
+                        return definition->name;
+                    }
+                    else if (decl.getParent())
+                    {
+                        return decl.getParent()->getNameAsString();
+                    }
+
+                    return std::string("");
+                }
+
+            public:
+
+                const clang::CXXMethodDecl& decl;
+                const clang::SourceRange sourceRange;
+                const std::string name;
+                const std::string className;
+                const bool isMacroExpansion;
+                const clang::SourceRange macroDefinitionSourceRange;
+                const std::vector<FunctionArgument> arguments;
+
+                CXXMethod(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
+                    :
+                    decl(decl),
+                    sourceRange(decl.getSourceRange()),
+                    name(getNameBeforeMacroExpansion(decl, ClassMetaData::preprocessor)),
+                    className(getClassName(decl, definition)),                    
+                    isMacroExpansion(isThisAMacroExpansion(decl)),
+                    macroDefinitionSourceRange(getSpellingSourceRange(sourceRange, decl.getASTContext())),
+                    arguments(FunctionArgument::getArgumentsFromDecl(decl, definition))
+                { ; }
+
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
+                {
+                    std::cout << indent << "* name=" << name << " (of class " << className << ")" << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    if (isMacroExpansion)
+                    {
+                        std::cout << indent << "\t+-> macro definition range: " << macroDefinitionSourceRange.printToString(sourceManager) << std::endl;
+                    }
+
+                    if (arguments.size())
+                    {
+                        std::cout << indent << "\t+-> arguments: " << std::endl;
+                        for (const auto& argument : arguments)
+                        {
+                            argument.printInfo(sourceManager, indent + std::string("\t\t"));
+                        }
+                    }
                 }
             };
 
@@ -507,6 +643,8 @@ namespace TRAFO_NAMESPACE
 
             class Definition
             {
+                friend class CXXMethod;
+
                 void testIfProxyClassIsCandidate()
                 {
                     bool hasMultiplePublicFieldTypes = false;
@@ -575,6 +713,7 @@ namespace TRAFO_NAMESPACE
                 std::vector<const Constructor*> ptrPublicConstructors;
                 std::vector<const Constructor*> ptrProtectedConstructors;
                 std::vector<const Constructor*> ptrPrivateConstructors;
+                std::vector<CXXMethod> cxxMethods;
                 bool hasCopyConstructor;
                 const Constructor* copyConstructor;
                 bool isProxyClassCandidate;
@@ -702,14 +841,6 @@ namespace TRAFO_NAMESPACE
                             }
                         }
 
-                        /*
-                        const std::string className = name + templateParameterString;
-                        const std::string classNameRef = className + std::string(" &");
-                        const std::string classNamePtr = className + std::string(" *");
-                        const std::string constClassName = std::string("const ") + className;
-                        const std::string constClassNameRef = std::string("const ") + className;
-                        const std::string constClassNameRRef = std::string("const ") + className;
-                        */
                         const std::string className = name + templateParameterString;
                         const std::string classNameInternal = name + templateParameterStringInternal;
 
@@ -718,6 +849,8 @@ namespace TRAFO_NAMESPACE
                             const clang::DeclarationName::NameKind kind = method->getDeclName().getNameKind();
                             if (kind == clang::DeclarationName::NameKind::CXXConstructorName || kind == clang::DeclarationName::NameKind::CXXDestructorName) continue;
 
+                            cxxMethods.emplace_back(*method, this);
+                            
                             const clang::SourceRange sourceRange = method->getSourceRange();
                             const std::uint32_t beginLine = getSpellingLineNumber(sourceRange.getBegin(), context);
                             const std::uint32_t endLine = getSpellingLineNumber(sourceRange.getEnd(), context);
@@ -725,9 +858,8 @@ namespace TRAFO_NAMESPACE
                             const clang::SourceLocation end = sourceManager.translateLineCol(declaration.fileId, endLine, 1);
                             
                             std::cout << "Method in class/struct " << name << ": " << getNameBeforeMacroExpansion(*method, ClassMetaData::preprocessor) << std::endl;
-                            std::cout << "\t+-> range: " << method->getSourceRange().printToString(sourceManager) << std::endl;
-                            std::cout << "\t+-> macro expansion: " << (mightBeMacroExpansion(*method) ? "maybe" : "no") << std::endl;
-                            std::cout << "\t+-> body: " << std::endl << dumpSourceRangeToString(clang::SourceRange(begin, end), sourceManager) << std::endl;
+                            std::cout << "\t+-> macro expansion: " << (isThisAMacroExpansion(*method) ? "yes" : "no") << std::endl;
+                            
                             for (const auto& param : method->parameters())
                             {
                                 const clang::QualType qualType = param->getType().getLocalUnqualifiedType();
@@ -738,7 +870,9 @@ namespace TRAFO_NAMESPACE
                                     typeName = name;
                                 }
                                 std::cout << "\t+-> arg: " << param->getNameAsString() << ", " << typeName << std::endl;
+                                std::cout << "\t\t+-> range: " << param->getSourceRange().printToString(sourceManager) << std::endl;
                             }
+                            
                         }
                     }
                 }
@@ -793,6 +927,15 @@ namespace TRAFO_NAMESPACE
                         for (const auto& constructor : constructors)
                         {
                             constructor.printInfo(sourceManager, indent + std::string("\t|\t"));
+                        }
+                    }
+
+                    if (cxxMethods.size() > 0)
+                    {
+                        std::cout << indent << "\t+-> methods:" << std::endl;
+                        for (const auto& method : cxxMethods)
+                        {
+                            method.printInfo(sourceManager, indent + std::string("\t|\t"));
                         }
                     }
 
