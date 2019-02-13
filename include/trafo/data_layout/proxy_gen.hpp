@@ -304,20 +304,20 @@ namespace TRAFO_NAMESPACE
                     });
             }
 
-            matcher.addMatcher(varDecl(hasType(constantArrayType().bind("arrayType"))).bind("arrayDecl"),
+            matcher.addMatcher(varDecl(hasType(constantArrayType().bind("constArrayType"))).bind("constArrayDecl"),
                 [&context, this] (const MatchFinder::MatchResult& result) mutable
                 {
-                    if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("arrayDecl"))
+                    if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("constArrayDecl"))
                     {
-                        if (const clang::ConstantArrayType* const arrayType = result.Nodes.getNodeAs<clang::ConstantArrayType>("arrayType"))
+                        if (const clang::ConstantArrayType* const arrayType = result.Nodes.getNodeAs<clang::ConstantArrayType>("constArrayType"))
                         {
-                            ArrayDeclaration arrayDecl = ArrayDeclaration::make(*decl, arrayType, context);
+                            ConstantArrayDeclaration arrayDecl = ConstantArrayDeclaration::make(*decl, arrayType, context);
                             const clang::Type* const type = arrayDecl.elementDataType.getTypePtrOrNull();
                             const bool isRecordType = (type ? type->isRecordType() : false);
 
                             if (!arrayDecl.elementDataType.isNull() && isRecordType)
                             {
-                                declarations.push_back(new ArrayDeclaration(arrayDecl));
+                                declarations.push_back(new ConstantArrayDeclaration(arrayDecl));
                                 proxyClassTargetNames.insert(arrayDecl.elementDataTypeName);
                             }
                         }

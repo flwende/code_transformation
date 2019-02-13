@@ -67,7 +67,7 @@ namespace TRAFO_NAMESPACE
             }
         };
 
-        class ArrayDeclaration : public Declaration
+        class ConstantArrayDeclaration : public Declaration
         {
             using Base = Declaration;
 
@@ -83,7 +83,7 @@ namespace TRAFO_NAMESPACE
             const std::uint32_t nestingLevel;
             const std::vector<std::size_t> extent;
 
-            ArrayDeclaration(const clang::VarDecl& decl, const bool isNested, const std::uint32_t nestingLevel, const clang::QualType elementDataType, const std::vector<std::size_t>& extent)
+            ConstantArrayDeclaration(const clang::VarDecl& decl, const bool isNested, const std::uint32_t nestingLevel, const clang::QualType elementDataType, const std::vector<std::size_t>& extent)
                 :
                 Base(decl, elementDataType),
                 arrayType(decl.getType()),
@@ -92,9 +92,9 @@ namespace TRAFO_NAMESPACE
                 extent(extent)
             { ; }
 
-            ~ArrayDeclaration() { ; }
+            ~ConstantArrayDeclaration() { ; }
 
-            static ArrayDeclaration make(const clang::VarDecl& decl, const clang::ConstantArrayType* arrayType, clang::ASTContext& context)
+            static ConstantArrayDeclaration make(const clang::VarDecl& decl, const clang::ConstantArrayType* arrayType, clang::ASTContext& context)
             {
                 clang::QualType qualType = arrayType->getElementType();  
                 const clang::Type* type = qualType.getTypePtrOrNull();
@@ -128,7 +128,7 @@ namespace TRAFO_NAMESPACE
                     break;
                 }
 
-                return ArrayDeclaration(decl, isNested, nestingLevel, elementDataType, extent);
+                return ConstantArrayDeclaration(decl, isNested, nestingLevel, elementDataType, extent);
             }
 
             virtual void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
@@ -139,16 +139,16 @@ namespace TRAFO_NAMESPACE
                 
                 std::cout << indent << "\t\t+-> declaration: " << decl.getSourceRange().printToString(sourceManager) << std::endl;
                 std::cout << indent << "\t\t+-> type: " << arrayType.getAsString() << std::endl;
+                std::cout << indent << "\t\t+-> extent: ";
+                for (std::size_t i = 0; i < extent.size(); ++i)
+                {
+                    std::cout << "[" << (extent[i] > 0 ? std::to_string(extent[i]) : std::string("-")) << "]";
+                }
+                std::cout << std::endl;
                 std::cout << indent << "\t\t+-> nested: " << (isNested ? "yes" : "no") << std::endl;
                 if (isNested)
                 {
                     std::cout << indent << "\t\t\t+-> nesting level: " << nestingLevel << std::endl;
-                    std::cout << indent << "\t\t\t+-> extent: ";
-                    for (std::size_t i = 0; i < extent.size(); ++i)
-                    {
-                        std::cout << "[" << (extent[i] > 0 ? std::to_string(extent[i]) : std::string("-")) << "]";
-                    }
-                    std::cout << std::endl;
                 }
             }
         };
@@ -262,16 +262,16 @@ namespace TRAFO_NAMESPACE
                 
                 std::cout << indent << "\t* container type: " << containerType.getAsString() << std::endl;
                 std::cout << indent << "\t\t+-> declaration: " << decl.getSourceRange().printToString(sourceManager) << std::endl;
+                std::cout << indent << "\t\t+-> extent: ";
+                for (std::size_t i = 0; i < extent.size(); ++i)
+                {
+                    std::cout << "[" << (extent[i] > 0 ? std::to_string(extent[i]) : std::string("-")) << "]";
+                }
+                std::cout << std::endl;
                 std::cout << indent << "\t\t+-> nested: " << (isNested ? "yes" : "no") << std::endl;
                 if (isNested)
                 {
                     std::cout << indent << "\t\t\t+-> nesting level: " << nestingLevel << std::endl;
-                    std::cout << indent << "\t\t\t+-> extent: ";
-                    for (std::size_t i = 0; i < extent.size(); ++i)
-                    {
-                        std::cout << "[" << (extent[i] > 0 ? std::to_string(extent[i]) : std::string("-")) << "]";
-                    }
-                    std::cout << std::endl;
                 }
             }
         };
