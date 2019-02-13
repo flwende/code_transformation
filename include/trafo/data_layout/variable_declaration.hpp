@@ -111,11 +111,9 @@ namespace TRAFO_NAMESPACE
                     {
                         isNested |= true;
                         ++nestingLevel;
-
                         arrayType = reinterpret_cast<const clang::ConstantArrayType*>(type); // maybe unsafe: getAs<> does not work here!
                         qualType = arrayType->getElementType();
                         type = qualType.getTypePtrOrNull();
-
                         continue;
                     }
 
