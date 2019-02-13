@@ -3,7 +3,10 @@
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
 
+#include <array>
+
 #include "prefix_sum.hpp"
+#include "classA.hpp"
 #include "classB.hpp"
 #include "classC.hpp"
 
@@ -16,6 +19,8 @@ std::vector<B<real_t>> prefix_sum(const std::vector<A<real_t, 3, float>>& x, con
     ps.reserve(x.size());
     std::vector<C> ps_inclusive(x.size());
     std::vector<C> ps_exclusive(x.size());
+    std::vector<std::array<std::vector<std::array<A<real_t, 3, double>, 4>>, 2>> dummy_1;
+    A<real_t, 3, int> dummy_2[12][14][3];
 
     ps_exclusive[0].x = 0; // exclusive prefix sum
     if (component == 'x')

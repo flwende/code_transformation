@@ -246,7 +246,7 @@ namespace TRAFO_NAMESPACE
         Rewriter rewriter;
         static std::shared_ptr<clang::Preprocessor> preprocessor;
         
-        std::vector<ContainerDeclaration> containerDeclarations;
+        std::vector<const Declaration*> declarations;
         std::set<std::string> proxyClassTargetNames;
         std::vector<std::unique_ptr<ClassMetaData>> proxyClassTargets;
         
@@ -276,37 +276,62 @@ namespace TRAFO_NAMESPACE
             return testResult;                
         }
 
-        bool matchContainerDeclarations(const std::vector<std::string>& containerNames, clang::ASTContext& context)
+        bool matchDeclarations(const std::vector<std::string>& containerNames, clang::ASTContext& context)
         {
             using namespace clang::ast_matchers;
 
             Matcher matcher;
 
-            containerDeclarations.clear();
+            declarations.clear();
 
             for (auto containerName : containerNames)
             {
                 matcher.addMatcher(varDecl(hasType(cxxRecordDecl(hasName(containerName)))).bind("varDecl"),
-                    [containerName, &context, this] (const MatchFinder::MatchResult& result) mutable
+                    [&containerNames, &context, this] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("varDecl"))
                         {
-                            ContainerDeclaration vecDecl = ContainerDeclaration::make(*decl, context, containerName);
-                            const clang::Type* const type = vecDecl.elementDataType.getTypePtrOrNull();
+                            ContainerDeclaration containerDecl = ContainerDeclaration::make(*decl, context, containerNames);
+                            const clang::Type* const type = containerDecl.elementDataType.getTypePtrOrNull();
                             const bool isRecordType = (type ? type->isRecordType() : false);
 
-                            if (!vecDecl.elementDataType.isNull() && isRecordType)
+                            if (!containerDecl.elementDataType.isNull() && isRecordType)
                             {
-                                containerDeclarations.push_back(vecDecl);
-                                proxyClassTargetNames.insert(vecDecl.elementDataTypeName);
+                                declarations.push_back(new ContainerDeclaration(containerDecl));
+                                proxyClassTargetNames.insert(containerDecl.elementDataTypeName);
                             }
                         }
                     });
             }
 
+            matcher.addMatcher(varDecl(hasType(constantArrayType().bind("arrayType"))).bind("arrayDecl"),
+                [&context, this] (const MatchFinder::MatchResult& result) mutable
+                {
+                    if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("arrayDecl"))
+                    {
+                        if (const clang::ConstantArrayType* const arrayType = result.Nodes.getNodeAs<clang::ConstantArrayType>("arrayType"))
+                        {
+                            ArrayDeclaration arrayDecl = ArrayDeclaration::make(*decl, arrayType, context);
+                            const clang::Type* const type = arrayDecl.elementDataType.getTypePtrOrNull();
+                            const bool isRecordType = (type ? type->isRecordType() : false);
+
+                            if (!arrayDecl.elementDataType.isNull() && isRecordType)
+                            {
+                                declarations.push_back(new ArrayDeclaration(arrayDecl));
+                                proxyClassTargetNames.insert(arrayDecl.elementDataTypeName);
+                            }
+                        }
+                    }
+                });
+
             matcher.run(context);
 
-            return (containerDeclarations.size() > 0);
+            for (const auto& declaration : declarations)
+            {
+                declaration->printInfo(context.getSourceManager());
+            }
+
+            return (declarations.size() > 0);
         }
 
         bool findProxyClassTargets(clang::ASTContext& context)
@@ -314,7 +339,25 @@ namespace TRAFO_NAMESPACE
             using namespace clang::ast_matchers;
 
             Matcher matcher;
+/*
+            REMOVE: JUST FOR TESTING
 
+            std::cout << "######################## HERE ##########################" << std::endl;
+            //matcher.addMatcher(fieldDecl(allOf(isPublic, hasName("x"), hasParent(recordDecl().bind("targetDecl")))),
+            matcher.addMatcher(fieldDecl(allOf(isPublic(), hasName("x"), hasParent(recordDecl().bind("targetDecl")))),
+                [] (const MatchFinder::MatchResult& result) mutable
+                {
+                    if (const clang::RecordDecl* const decl = result.Nodes.getNodeAs<clang::RecordDecl>("targetDecl"))
+                    {
+                        std::cout << "record name: " << decl->getNameAsString() << std::endl;
+                    }
+                });
+            matcher.run(context);
+
+            std::cout << "######################## HERE ##########################" << std::endl;
+
+            return false;
+*/
             for (auto name : proxyClassTargetNames)
             {
                 // template class declarations
@@ -752,6 +795,17 @@ namespace TRAFO_NAMESPACE
             rewriter(clangRewriter)
         { ; }
 
+        ~InsertProxyClassImplementation()
+        {
+            for (const auto& declaration : declarations)
+            {
+                if (declaration)
+                {
+                    delete declaration;
+                }
+            }
+        }
+
         static void registerPreprocessor(std::shared_ptr<clang::Preprocessor> preprocessor)
         {
             if (!InsertProxyClassImplementation::preprocessor.get())
@@ -766,7 +820,8 @@ namespace TRAFO_NAMESPACE
             // step 1: find all relevant container declarations
             std::vector<std::string> containerNames;
             containerNames.push_back(std::string("vector"));
-            if (!matchContainerDeclarations(containerNames, context)) return;
+            containerNames.push_back(std::string("array"));
+            if (!matchDeclarations(containerNames, context)) return;
 
             // step 2: check if element data type is candidate for proxy class generation
             if (!findProxyClassTargets(context)) return;
