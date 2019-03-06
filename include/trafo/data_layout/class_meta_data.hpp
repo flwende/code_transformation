@@ -375,7 +375,7 @@ namespace TRAFO_NAMESPACE
 
             class TemplateParameter
             {
-                static std::string getArgumentName(const clang::TemplateArgument& arg, const std::vector<const TemplateParameter*>& typeParameters, const bool internalRepresentation = false, bool* isTypeParameter = nullptr)
+                static std::string getArgumentName(const clang::TemplateArgument& arg, const std::vector<TemplateParameter>& templateParameters, const bool internalRepresentation = false, bool* isTypeParameter = nullptr)
                 {
                     std::string argName("ERROR");
                     
@@ -397,11 +397,19 @@ namespace TRAFO_NAMESPACE
                                 {
                                     const std::uint32_t argNameTypeId = std::atoi(argName.substr(argName.rfind('-') + 1).c_str());
 
-                                    if (argNameTypeId < typeParameters.size())
+                                    for (std::size_t i = 0, t = 0; i < templateParameters.size(); ++i)
                                     {
-                                        argName = typeParameters[argNameTypeId]->name;
+                                        if (templateParameters[i].isTypeParameter)
+                                        {
+                                            if (argNameTypeId == t)
+                                            {
+                                                argName = templateParameters[i].name;
+                                                break;
+                                            }
+                                            ++t;
+                                        }
                                     }
-
+                                    
                                     if (isTypeParameter)
                                     {
                                         *isTypeParameter = true;
@@ -469,7 +477,7 @@ namespace TRAFO_NAMESPACE
                     return templateParameters;
                 }
 
-                static std::string getPartialSpecializationArgumentString(const clang::CXXRecordDecl& decl, const std::vector<const TemplateParameter*>& typeParameters, const bool internalRepresentation = false)
+                static std::string getPartialSpecializationArgumentString(const clang::CXXRecordDecl& decl, const std::vector<TemplateParameter>& templateParameters, const bool internalRepresentation = false)
                 {
                     std::stringstream templateArgumentStringStream;
 
@@ -482,7 +490,7 @@ namespace TRAFO_NAMESPACE
                             templateArgumentStringStream << "<";
                             for (std::uint32_t i = 0; i < iMax; ++i)
                             {
-                                const std::string argName = getArgumentName(args[i], typeParameters, internalRepresentation);
+                                const std::string argName = getArgumentName(args[i], templateParameters, internalRepresentation);
                                 templateArgumentStringStream << argName << ((i + 1) < iMax ? ", " : ">");
                             }
                         }   
@@ -491,7 +499,7 @@ namespace TRAFO_NAMESPACE
                     return templateArgumentStringStream.str();
                 }
 
-                static std::vector<std::pair<std::string, bool>> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, const std::vector<const TemplateParameter*>& typeParameters)
+                static std::vector<std::pair<std::string, bool>> getPartialSpecializationArguments(const clang::CXXRecordDecl& decl, const std::vector<TemplateParameter>& templateParameters)
                 {
                     std::vector<std::pair<std::string, bool>> argNames;                   
 
@@ -501,7 +509,7 @@ namespace TRAFO_NAMESPACE
                         for (std::uint32_t i = 0, iMax = args.size(); i < iMax; ++i)
                         {
                             bool isTypeParameter = false;
-                            const std::string argName = getArgumentName(args[i], typeParameters, false, &isTypeParameter);
+                            const std::string argName = getArgumentName(args[i], templateParameters, false, &isTypeParameter);
                             argNames.push_back(std::make_pair(argName, isTypeParameter));
                         }   
                     }
@@ -570,21 +578,6 @@ namespace TRAFO_NAMESPACE
 
             class Declaration
             {
-                std::vector<const TemplateParameter*> getTemplateTypeParameters() const
-                {
-                    std::vector<const TemplateParameter*> templateTypeParameters;
-
-                    for (const auto& parameter : templateParameters)
-                    {
-                        if (parameter.isTypeParameter)
-                        {
-                            templateTypeParameters.push_back(&parameter);
-                        }
-                    }
-
-                    return templateTypeParameters;
-                }
-                
                 std::string getTemplateParamerString(const bool withTypeName = false, const std::string namePrefix = std::string("")) const
                 {
                     std::stringstream templateParameterStringStream;
@@ -628,7 +621,6 @@ namespace TRAFO_NAMESPACE
                 const std::vector<Namespace> namespaces;
                 const std::string namespaceString;
                 const std::vector<TemplateParameter> templateParameters;
-                const std::vector<const TemplateParameter*> templateTypeParameters;
                 const clang::SourceRange templateParameterListSourceRange;
                 const std::string templateParameterDeclString;
                 const std::string templateParameterDeclStringX;
@@ -655,7 +647,6 @@ namespace TRAFO_NAMESPACE
                     namespaces(Namespace::getNamespacesFromDecl(decl)),
                     namespaceString(concat(getNamespaceNames(), std::string("::")) + std::string("::")),
                     templateParameters(TemplateParameter::getParametersFromDecl(classTemplateDecl, sourceManager)),
-                    templateTypeParameters(getTemplateTypeParameters()),
                     templateParameterListSourceRange(TemplateParameter::getParameterListSourceRange(classTemplateDecl)),
                     templateParameterDeclString(getTemplateParamerString(true)),
                     templateParameterDeclStringX(getTemplateParamerString(true, std::string("_"))),
@@ -839,9 +830,9 @@ namespace TRAFO_NAMESPACE
                     name(decl.getNameAsString()),
                     nameSourceRange(decl.getLocation()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
-                    templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateTypeParameters) : declaration.templateParameterString),
-                    templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateTypeParameters, true) : declaration.templateParameterString),
-                    templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateTypeParameters) : std::vector<std::pair<std::string, bool>>()),
+                    templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters) : declaration.templateParameterString),
+                    templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, true) : declaration.templateParameterString),
+                    templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateParameters) : std::vector<std::pair<std::string, bool>>()),
                     publicAccess(nullptr),
                     protectedAccess(nullptr),
                     privateAccess(nullptr),
@@ -854,8 +845,6 @@ namespace TRAFO_NAMESPACE
 
                     Matcher matcher;
 
-                    //cxxMethods.reserve(100);
-                    
                     // get fields
                     const std::size_t numFields = std::distance(decl.field_begin(), decl.field_end());
                     fields.reserve(numFields);
