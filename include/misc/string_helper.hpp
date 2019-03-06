@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -21,17 +22,55 @@ namespace TRAFO_NAMESPACE
 {
     namespace internal
     {
-        bool findAndReplace(std::string& input, const std::string& findString, const std::string& replaceString)
-        {
-            const std::string::size_type pos = input.find(findString);
-            
-            if (pos != std::string::npos)
+        bool find(const std::string& input, const std::string& findString, const bool matchWholeWord = false)
+        {   
+            // match all occurences of 'findString' with
+            //   a) leading character not in {'a-z' 'A-Z' '0-9'} or leading linestart (^)
+            //   b) succeeding characted not in {'a-z' 'A-Z' '0-9'} or succeeding lineend ($)
+            //
+            // Note 1: we use three captures ($1)($2)($3) with $0 being the match itself and $2 being 'findString'
+            // Note 2: the last capture is not part of the overall regular expression (?=..)
+            const std::string regPrefix = std::string(matchWholeWord ? "(^|[^a-zA-Z0-9_])" : "()");
+            const std::string regSuffix = std::string(matchWholeWord ? "(?=$|[^a-zA-Z0-9_])" : "()");
+            std::regex regExpr(regPrefix + findString + regSuffix);
+            std::smatch regMatch;
+            std::string suffixString(input);
+            bool match = false;
+
+            return std::regex_search(suffixString, regMatch, regExpr);
+        }        
+
+        bool findAndReplace(std::string& input, const std::string& findString, const std::string& replaceString, const bool findAll = false, const bool matchWholeWord = false)
+        {   
+            // match all occurences of 'findString' with
+            //   a) leading character not in {'a-z' 'A-Z' '0-9'} or leading linestart (^)
+            //   b) succeeding characted not in {'a-z' 'A-Z' '0-9'} or succeeding lineend ($)
+            //
+            // Note 1: we use three captures ($1)($2)($3) with $0 being the match itself and $2 being 'findString'
+            // Note 2: the last capture is not part of the overall regular expression (?=..)
+            const std::string regPrefix = std::string(matchWholeWord ? "(^|[^a-zA-Z0-9_])" : "()");
+            const std::string regSuffix = std::string(matchWholeWord ? "(?=$|[^a-zA-Z0-9_])" : "()");
+            std::regex regExpr(regPrefix + findString + regSuffix);
+            std::smatch regMatch;
+            std::string suffixString(input);
+            bool match = false;
+
+            while(std::regex_search(suffixString, regMatch, regExpr))
             {
+                // there was at least one match
+                match = true;
+
+                // match position: start of 'findString': original input length minus the length of the remaining suffix minus the length of 'findString'
+                const std::size_t pos = input.length() - (regMatch.suffix().length() + findString.length());
                 input.replace(pos, findString.length(), replaceString);
-                return true;
+
+                if (!findAll) break;
+
+                // continue with the remaining suffix string
+                suffixString = regMatch.suffix().str();
             }
 
-            return false;
+            return match;
         }
 
         static std::vector<std::string> splitString(const std::string& input, const char delimiter)

@@ -94,36 +94,43 @@ namespace TRAFO_NAMESPACE
 
             ~ConstantArrayDeclaration() { ; }
 
-            static ConstantArrayDeclaration make(const clang::VarDecl& decl, const clang::ConstantArrayType* arrayType, clang::ASTContext& context)
+            static ConstantArrayDeclaration make(const clang::VarDecl& decl, clang::ASTContext& context)
             {
-                clang::QualType qualType = arrayType->getElementType();  
-                const clang::Type* type = qualType.getTypePtrOrNull();
                 clang::QualType elementDataType;
                 bool isNested = false;
                 std::uint32_t nestingLevel = 0;
                 std::vector<std::size_t> extent;
 
-                while (type)
+                if (const clang::Type* type = decl.getType().getTypePtrOrNull())
                 {
-                    extent.push_back(arrayType->getSize().getLimitedValue());
-
                     if (type->isConstantArrayType())
                     {
-                        isNested |= true;
-                        ++nestingLevel;
-                        arrayType = reinterpret_cast<const clang::ConstantArrayType*>(type); // maybe unsafe: getAs<> does not work here!
-                        qualType = arrayType->getElementType();
-                        type = qualType.getTypePtrOrNull();
-                        continue;
+                        do
+                        {
+                            // in all cases 
+                            const clang::ConstantArrayType* arrayType = reinterpret_cast<const clang::ConstantArrayType*>(type);
+                            clang::QualType qualType = arrayType->getElementType();
+
+                            extent.push_back(arrayType->getSize().getLimitedValue());
+                            type = qualType.getTypePtrOrNull();
+
+                            if (type->isConstantArrayType())
+                            {
+                                isNested |= true;
+                                ++nestingLevel;
+                                continue;
+                            }
+
+                            elementDataType = qualType;
+                            break;
+                        } 
+                        while (type);
                     }
-
-                    elementDataType = qualType;
-
-                    // break condition for the outer loop!
-                    // this point is reached only if the current type is not a constant array type
-                    type = nullptr;
-
-                    break;
+                    else
+                    {
+                        std::cerr << "error: this is not a constant array declaration" << std::endl;
+                    }
+                    
                 }
 
                 return ConstantArrayDeclaration(decl, isNested, nestingLevel, elementDataType, extent);
@@ -213,6 +220,7 @@ namespace TRAFO_NAMESPACE
                         if (const clang::Type* const taType = taQualType.getTypePtrOrNull())
                         {
                             // if it is a class or structure type, check for it being a containerType
+                            // TEST: if (taType->isRecordType())
                             if (taType->isClassType() || taType->isStructureType())
                             {
                                 // if it is a container, get nesting information and continue the loop execution

@@ -249,6 +249,7 @@ namespace TRAFO_NAMESPACE
         std::vector<const Declaration*> declarations;
         std::set<std::string> proxyClassTargetNames;
         std::vector<std::unique_ptr<ClassMetaData>> proxyClassTargets;
+        const std::string proxyNamespace = std::string("proxy_internal");
         
         bool isThisClassInstantiated(const clang::CXXRecordDecl* const decl)
         {
@@ -304,22 +305,38 @@ namespace TRAFO_NAMESPACE
                     });
             }
 
-            matcher.addMatcher(varDecl(hasType(constantArrayType().bind("constArrayType"))).bind("constArrayDecl"),
+/*
+            FIX THAT
+            matcher.addMatcher(varDecl(hasType(cxxRecordDecl(anyOf(hasName("vector"), hasName("array"))))).bind("varDecl"),
+                [&containerNames, &context, this] (const MatchFinder::MatchResult& result) mutable
+                {
+                    if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("varDecl"))
+                    {
+                        ContainerDeclaration containerDecl = ContainerDeclaration::make(*decl, context, containerNames);
+                        const clang::Type* const type = containerDecl.elementDataType.getTypePtrOrNull();
+                        const bool isRecordType = (type ? type->isRecordType() : false);
+
+                        if (!containerDecl.elementDataType.isNull() && isRecordType)
+                        {
+                            declarations.push_back(new ContainerDeclaration(containerDecl));
+                            proxyClassTargetNames.insert(containerDecl.elementDataTypeName);
+                        }
+                    }
+                });
+*/
+            matcher.addMatcher(varDecl(hasType(constantArrayType())).bind("constArrayDecl"),
                 [&context, this] (const MatchFinder::MatchResult& result) mutable
                 {
                     if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("constArrayDecl"))
                     {
-                        if (const clang::ConstantArrayType* const arrayType = result.Nodes.getNodeAs<clang::ConstantArrayType>("constArrayType"))
-                        {
-                            ConstantArrayDeclaration arrayDecl = ConstantArrayDeclaration::make(*decl, arrayType, context);
-                            const clang::Type* const type = arrayDecl.elementDataType.getTypePtrOrNull();
-                            const bool isRecordType = (type ? type->isRecordType() : false);
+                        ConstantArrayDeclaration arrayDecl = ConstantArrayDeclaration::make(*decl, context);
+                        const clang::Type* const type = arrayDecl.elementDataType.getTypePtrOrNull();
+                        const bool isRecordType = (type ? type->isRecordType() : false);
 
-                            if (!arrayDecl.elementDataType.isNull() && isRecordType)
-                            {
-                                declarations.push_back(new ConstantArrayDeclaration(arrayDecl));
-                                proxyClassTargetNames.insert(arrayDecl.elementDataTypeName);
-                            }
+                        if (!arrayDecl.elementDataType.isNull() && isRecordType)
+                        {
+                            declarations.push_back(new ConstantArrayDeclaration(arrayDecl));
+                            proxyClassTargetNames.insert(arrayDecl.elementDataTypeName);
                         }
                     }
                 });
@@ -447,12 +464,13 @@ namespace TRAFO_NAMESPACE
             const std::string extIndent(declaration.indent.value + declaration.indent.increment, ' ');
             std::stringstream proxyClassDeclaration;
 
-            proxyClassDeclaration << indent << "namespace proxy_internal\n";
+            proxyClassDeclaration << indent << "namespace " << proxyNamespace << "\n";
             proxyClassDeclaration << indent << "{\n";
             if (declaration.templateParameters.size())
             {
                 const clang::SourceManager& sourceManager = declaration.getSourceManager();
                 const std::string parameterList = dumpSourceRangeToString(declaration.templateParameterListSourceRange, sourceManager);
+
                 proxyClassDeclaration << extIndent << parameterList << ">\n";
             }
             proxyClassDeclaration << extIndent << (declaration.isStruct ? "struct " : "class ") << declaration.name << "_proxy;\n";
@@ -467,19 +485,7 @@ namespace TRAFO_NAMESPACE
             const std::string indent(insideClassIndent.value, ' ');
             std::stringstream usingStmt;
 
-            /*
-            usingStmt << indent << "using " << definition.name << "_proxy = " << definition.declaration.namespaceString << "proxy_internal::" << definition.name << "_proxy";
-            if (definition.isTemplatePartialSpecialization)
-            {
-                usingStmt << "<" << concat(definition.getTemplatePartialSpecializationArgumentNames(), std::string(", ")) << ">";
-            }
-            else if (definition.declaration.templateParameters.size() > 0)
-            {
-                usingStmt << definition.declaration.templateParameterString;
-            }
-            usingStmt << ";\n";
-            */
-            usingStmt << indent << "using " << definition.name << "_proxy = " << definition.declaration.namespaceString << "proxy_internal::" << definition.name << "_proxy";
+            usingStmt << indent << "using proxy_type = typename " << definition.declaration.namespaceString << proxyNamespace << "::" << definition.name << "_proxy";
             usingStmt << definition.templateParameterString << ";\n";
 
             return usingStmt.str();
@@ -511,15 +517,21 @@ namespace TRAFO_NAMESPACE
         {
             const Indentation insideClassIndent = definition.declaration.indent + 1;
             const std::string indent(insideClassIndent.value, ' ');
+            const std::uint32_t numTemplateParameters = definition.declaration.templateParameters.size();
             std::stringstream constructorDefinition;
+
+            if (numTemplateParameters > 0)
+            {
+                constructorDefinition << indent << "template " << definition.declaration.templateParameterDeclStringX << "\n";
+            }
+
+            // signature without the parameter name
+            constructorDefinition << indent << definition.name << "(const " << proxyNamespace << "::" << definition.name << "_proxy" << definition.declaration.templateParameterStringX <<  "& ";
 
             if (definition.hasCopyConstructor)
             {
                 const clang::CXXConstructorDecl& constructorDecl = definition.copyConstructor->decl;
                 const clang::ParmVarDecl* const parameter = constructorDecl.getParamDecl(0); // never nullptr
-
-                // signature without the parameter name
-                constructorDefinition << indent << definition.name << "(const " << definition.name << "_proxy& ";
 
                 // dump the definition of the copy constructor starting at the parameter name
                 const clang::SourceRange everythingFromParmVarDeclName(parameter->getEndLoc(), constructorDecl.getEndLoc());
@@ -531,8 +543,8 @@ namespace TRAFO_NAMESPACE
             }
             else
             {
-                // signature + initializer list + no body
-                constructorDefinition << indent << definition.name << "(const " << definition.name << "_proxy& other)\n";
+                // parameter name + initializer list + no body
+                constructorDefinition << "other)\n";
                 constructorDefinition << generateConstructorInitializerList(definition, std::string("other"), insideClassIndent + 1);
                 constructorDefinition << indent << "{ ; }";
             }
@@ -540,6 +552,25 @@ namespace TRAFO_NAMESPACE
 
             return constructorDefinition.str();
         }
+/*
+        std::string createMethodWithProxyArguments(const internal::ClassMetaData::CXXMethod& method)
+        {
+            clang::ASTContext& context = method.decl.getASTContext();
+            const clang::SourceManager& sourceManager = context.getSourceManager();
+            std::string methodString;
+
+            if (method.isMacroExpansion)
+            {
+                methodString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);
+            }
+            else
+            {
+                methodString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);
+            }
+
+            return (methodString + std::string("\n"));
+        }
+*/
 
         void modifyOriginalSourceCode(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter)
         {
@@ -557,24 +588,14 @@ namespace TRAFO_NAMESPACE
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
             for (const auto& definition : definitions)
             {
-                // insert using statement into class definition
-                const std::string usingStmt = generateProxyClassUsingStmt(definition);
-                rewriter.insert(definition.innerSourceRange.getBegin(), usingStmt);
-                
-                // insert constructor: in case of a C++ class, there must be at least one public access specifier
+                const Indentation insideClassIndent = definition.declaration.indent + 1;
+                const std::string indent(insideClassIndent.value, ' ');
+
+                // in case of a C++ class, there must be at least one public access specifier
                 // as we require proxy class candidates have at least one public field!
                 clang::SourceLocation sourceLocation;
-                if (definition.hasCopyConstructor)
-                {
-                    const std::uint32_t lineEOD = context.getFullLoc(definition.copyConstructor->sourceRange.getEnd()).getSpellingLineNumber();
-                    sourceLocation = sourceManager.translateLineCol(fileId, lineEOD + 1, 1);
-                }
-                else if (definition.ptrPublicConstructors.size() > 0)
-                {
-                    const std::uint32_t lineEOD = context.getFullLoc(definition.ptrPublicConstructors.back()->sourceRange.getEnd()).getSpellingLineNumber();
-                    sourceLocation = sourceManager.translateLineCol(fileId, lineEOD + 1, 1);
-                }
-                else if (definition.publicAccess)
+
+                if (definition.publicAccess)
                 {
                     sourceLocation = definition.publicAccess->scopeBegin;
 
@@ -583,7 +604,62 @@ namespace TRAFO_NAMESPACE
                 {
                     sourceLocation = definition.innerSourceRange.getBegin();
                 }
+
+                // insert using statement into class definition
+                rewriter.insert(sourceLocation, generateProxyClassUsingStmt(definition));
+                
+                // insert constructor
+                if (definition.hasCopyConstructor)
+                {
+                    sourceLocation = getNextLine(definition.copyConstructor->sourceRange.getEnd(), context);
+                }
+                else if (definition.ptrPublicConstructors.size() > 0)
+                {
+                    sourceLocation = getNextLine(definition.ptrPublicConstructors.back()->sourceRange.getEnd(), context);
+                }
                 rewriter.insert(sourceLocation, generateConstructorClassFromProxyClass(definition));
+
+                // insert methods that have the class type as argument type
+                for (const auto& method : definition.cxxMethods)
+                {
+                    #if !defined(bla)
+                    if (method.hasClassTypeArguments)
+                    { 
+                        const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
+
+                        if (method.isMacroExpansion)
+                        {
+                            std::string macroString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);                            
+                            if (findAndReplace(macroString, method.className, proxyTypeName, true, true))
+                            {
+                                rewriter.insert(getNextLine(getExpansionSourceLocation(method.sourceRange.getEnd(), context), context), indent + macroString + std::string("\n"));
+                            }
+                        }
+                        else
+                        {
+                            // duplicate the original function definition
+                            std::string functionString = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);                            
+                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionString);
+
+                            // apply changes to the original function definition: replace argument types by proxy types
+                            for (const std::uint32_t i : method.classTypeArguments)
+                            {
+                                const auto& argument = method.arguments[i];
+                                std::string typeName = argument.elementTypeName;
+                                findAndReplace(typeName, method.className, std::string(proxyNamespace) + std::string("::") + method.className + std::string("_proxy"), true, true);
+
+                                const std::string argumentName = (argument.isConst ? "const " : "") + typeName +
+                                    std::string(argument.isRReference ? "&&" : "") + 
+                                    std::string(argument.isLReference ? "&" : "") + 
+                                    std::string(argument.isPointer ? "* " : " ") + 
+                                    argument.name;
+
+                                rewriter.replace(argument.sourceRange, argumentName);
+                            }
+                        }
+                    }
+                    #endif
+                }
             }
             
             // insert include line outside the outermost namespace or after the last class definition if there is no namespace
@@ -769,22 +845,23 @@ namespace TRAFO_NAMESPACE
                 std::cout << "########################################################" << std::endl;
 
                 target->printInfo();
-
+                
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);
 
                 // TODO: replace by writing back to file!
                 rewriter.getEditBuffer(target->fileId).write(llvm::outs());
-
+                
                 std::cout << "########################################################" << std::endl;
-
+                /*
                 // generate proxy class definition
                 generateProxyClassDefinition(target, proxyClassCreator, std::string("// my header\n"));
 
                 // TODO: replace by writing back to file!
                 proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
-                
+
                 std::cout << "########################################################" << std::endl;
+                */
             }
         }
 

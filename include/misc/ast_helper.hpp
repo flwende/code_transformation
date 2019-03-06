@@ -83,18 +83,9 @@ namespace TRAFO_NAMESPACE
             return context.getFullLoc(sourceLocation).getExpansionLoc();
         }
 
-        static clang::SourceRange getSpellingSourceRange(const clang::SourceRange& sourceRange, clang::ASTContext& context)
-        {
-            const clang::SourceLocation spellingBeginLoc = getSpellingSourceLocation(sourceRange.getBegin(), context);//context.getFullLoc(sourceRange.getBegin()).getSpellingLoc();
-            const clang::SourceLocation spellingEndLoc = getSpellingSourceLocation(sourceRange.getEnd(), context);//context.getFullLoc(sourceRange.getEnd()).getSpellingLoc();
-
-            return clang::SourceRange(spellingBeginLoc, spellingEndLoc);
-        }
-
         static clang::SourceLocation getBeginOfLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
-            //const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
             const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
             const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
 
@@ -104,7 +95,6 @@ namespace TRAFO_NAMESPACE
         static clang::SourceLocation getNextLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
-            //const clang::FileID fileId = sourceManager.getFileID(sourceLocation);
             const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
             const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
             const clang::SourceLocation nextLine = sourceManager.translateLineCol(fileId, sourceLocationLineNumber + 1, 1);
@@ -117,6 +107,44 @@ namespace TRAFO_NAMESPACE
             {
                 return nextLine;
             }
+        }
+
+        static clang::SourceRange getSpellingSourceRange(const clang::SourceRange& sourceRange, clang::ASTContext& context)
+        {
+            const clang::SourceLocation spellingBeginLoc = getSpellingSourceLocation(sourceRange.getBegin(), context);
+            const clang::SourceLocation spellingEndLoc = getSpellingSourceLocation(sourceRange.getEnd(), context);
+
+            return clang::SourceRange(spellingBeginLoc, spellingEndLoc);
+        }
+
+        static clang::SourceRange getExpansionSourceRange(const clang::SourceRange& sourceRange, clang::ASTContext& context)
+        {
+            const clang::SourceLocation expansionBeginLoc = getExpansionSourceLocation(sourceRange.getBegin(), context);
+            const clang::SourceLocation expansionEndLoc = getExpansionSourceLocation(sourceRange.getEnd(), context);
+
+            if (expansionBeginLoc == expansionEndLoc)
+            {
+                return clang::SourceRange(expansionBeginLoc, getNextLine(expansionBeginLoc, context).getLocWithOffset(-1));
+            }
+            else
+            {
+                return clang::SourceRange(expansionBeginLoc, expansionEndLoc);
+            }
+        }
+
+        static clang::SourceRange extendSourceRangeByLines(const clang::SourceRange& sourceRange, const std::size_t numLines, clang::ASTContext& context)
+        {
+            const clang::SourceLocation beginLoc = sourceRange.getBegin();
+            const clang::SourceManager& sourceManager = context.getSourceManager();
+            const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(beginLoc, context));
+
+            const std::uint32_t endLocLineNumber = getSpellingLineNumber(sourceRange.getEnd(), context);
+            const clang::SourceLocation endLoc = sourceManager.translateLineCol(fileId, endLocLineNumber + numLines, 1);
+            const clang::SourceRange extendedSourceRange(beginLoc, endLoc);
+
+            if (extendedSourceRange.isValid()) return extendedSourceRange;
+
+            return sourceRange;
         }
 
         /*
@@ -216,7 +244,6 @@ namespace TRAFO_NAMESPACE
             const std::uint32_t lineDecl = fullDeclSourceLocation.getSpellingLineNumber();
 
             // get full source location of FILE end
-            //const clang::FileID fid = sourceManager.getFileID(declSourceLocation);
             const clang::FileID fid = sourceManager.getFileID(getSpellingSourceLocation(declSourceLocation, context));
             const clang::SourceLocation EOFLocation = sourceManager.getLocForEndOfFile(fid);
             const clang::FullSourceLoc fullEOFLocation = context.getFullLoc(EOFLocation);
@@ -276,8 +303,6 @@ namespace TRAFO_NAMESPACE
             if (declSpellingLineNumberBegin != declExpansionLineNumberBegin)
             {
                 const clang::SourceManager& sourceManager = context.getSourceManager();
-                // use spellingLoc here to get the right fileId
-                //const clang::FileID fileId = sourceManager.getFileID(context.getFullLoc(decl.getBeginLoc()).getSpellingLoc());
                 const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(decl.getBeginLoc(), context));
                 
                 for (std::uint32_t i = declSpellingLineNumberBegin; i >= 0; --i)
