@@ -673,8 +673,8 @@ namespace TRAFO_NAMESPACE
         {
             std::stringstream constructor;
             constructor << indent << definition.name << "_proxy(";
-            constructor << definition.ptrPublicFields[0]->typeName << "* ptr, const std::size_t n";
-            if (definition.fields.size() > definition.ptrPublicFields.size())
+            constructor << definition.publicFieldTypeName << "* ptr, const std::size_t n";
+            if (definition.fields.size() > definition.numPublicFields)
             {
                 for (const auto& field : definition.fields)
                 {

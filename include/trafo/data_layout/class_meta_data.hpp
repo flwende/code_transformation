@@ -741,19 +741,22 @@ namespace TRAFO_NAMESPACE
                 {
                     bool hasMultiplePublicFieldTypes = false;
                     bool hasNonFundamentalPublicFields = false;
-                    const std::string publicFieldTypeName = ptrPublicFields[0]->typeName;
+
+                    // at least one public field
+                    isProxyClassCandidate &= (numPublicFields > 0);
 
                     // not abstract, polymorphic, empty
                     isProxyClassCandidate &= !(decl.isAbstract() || decl.isPolymorphic() || decl.isEmpty());
 
-                    // at least one public field
-                    isProxyClassCandidate &= (ptrPublicFields.size() > 0);
+                    if (!isProxyClassCandidate) return;
 
                     // public fields should be all fundamental or templated and of the same type
-                    for (const auto& field : ptrPublicFields)
+                    for (const auto& field : fields)
                     {
-                        hasMultiplePublicFieldTypes |= (field->typeName != publicFieldTypeName);
-                        hasNonFundamentalPublicFields |= !(field->isFundamentalOrTemplated);
+                        if (!field.isPublic) continue;
+
+                        hasMultiplePublicFieldTypes |= (field.typeName != publicFieldTypeName);
+                        hasNonFundamentalPublicFields |= !(field.isFundamentalOrTemplated);
                     }
 
                     isProxyClassCandidate &= !(hasMultiplePublicFieldTypes || hasNonFundamentalPublicFields);
@@ -794,9 +797,10 @@ namespace TRAFO_NAMESPACE
                 const std::string templateParameterStringInternal;
                 const std::vector<std::pair<std::string, bool>> templatePartialSpecializationArguments;
                 std::vector<Field> fields;
-                std::vector<const Field*> ptrPublicFields;
-                std::vector<const Field*> ptrProtectedFields;
-                std::vector<const Field*> ptrPrivateFields;
+                std::uint32_t numPublicFields;
+                std::uint32_t numProtectedFields;
+                std::uint32_t numPrivateFields;
+                std::string publicFieldTypeName;
                 std::vector<AccessSpecifier> accessSpecifiers;
                 const AccessSpecifier* publicAccess;
                 const AccessSpecifier* protectedAccess;
@@ -831,6 +835,10 @@ namespace TRAFO_NAMESPACE
                     templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters) : declaration.templateParameterString),
                     templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, true) : declaration.templateParameterString),
                     templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateParameters) : std::vector<std::pair<std::string, bool>>()),
+                    numPublicFields(0),
+                    numProtectedFields(0),
+                    numPrivateFields(0),
+                    publicFieldTypeName(std::string("")),
                     publicAccess(nullptr),
                     protectedAccess(nullptr),
                     privateAccess(nullptr),
@@ -853,7 +861,8 @@ namespace TRAFO_NAMESPACE
                             if (const clang::FieldDecl* const decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl")) \
                             { \
                                 fields.emplace_back(*decl, AccessSpecifier::Kind::ACCESS); \
-                                ptr ## ACCESS ## Fields.emplace_back(&fields.back()); \
+                                ++num ## ACCESS ## Fields; \
+                                if (fields.back().isPublic && publicFieldTypeName.empty()) publicFieldTypeName = fields.back().typeName; \
                             } \
                         }, &decl)
 
@@ -952,14 +961,11 @@ namespace TRAFO_NAMESPACE
                         }
 
                         // is this a homogeneous structured type?
-                        for (const auto& field : fields)
-                        {
-                            if (field.typeName != fields[0].typeName)
-                            {
-                                isHomogeneous = false;
-                                break;
-                            }
-                        }
+                        isHomogeneous = std::accumulate(fields.begin(), fields.end(), true, 
+                            [this] (const bool red, const Field& field) 
+                            { 
+                                return red & (field.typeName == fields[0].typeName); 
+                            });
 
                         const std::string className = name + templateParameterString;
                         const std::string classNameInternal = name + templateParameterStringInternal;
@@ -1040,8 +1046,7 @@ namespace TRAFO_NAMESPACE
 
                     if (fields.size() > 0)
                     {
-                        std::cout << indent << "\t+-> fields: (public/protected/private)=(" << ptrPublicFields.size() << "/" << ptrProtectedFields.size() << "/" << ptrPrivateFields.size() << ")";
-                        std::cout << indent << ", is homogeneous: " << (isHomogeneous ? "yes" : "no") << std::endl;
+                        std::cout << indent << "\t+-> fields: " << (isHomogeneous ? "homogeneous type" : "inhomogeneous type") << std::endl;
                         for (const auto& field : fields)
                         {
                             field.printInfo(sourceManager, indent + std::string("\t\t"));
