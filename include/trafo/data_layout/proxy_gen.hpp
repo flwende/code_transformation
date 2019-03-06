@@ -642,9 +642,10 @@ namespace TRAFO_NAMESPACE
                             rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionString);
 
                             // apply changes to the original function definition: replace argument types by proxy types
-                            for (const std::uint32_t i : method.classTypeArguments)
+                            for (const auto& argument : method.arguments)
                             {
-                                const auto& argument = method.arguments[i];
+                                if (!argument.isClassType) continue;
+
                                 std::string typeName = argument.elementTypeName;
                                 findAndReplace(typeName, method.className, std::string(proxyNamespace) + std::string("::") + method.className + std::string("_proxy"), true, true);
 

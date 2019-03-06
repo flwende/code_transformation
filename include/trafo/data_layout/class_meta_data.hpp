@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 #include <misc/ast_helper.hpp>
@@ -299,7 +300,6 @@ namespace TRAFO_NAMESPACE
                 const bool isMacroExpansion;
                 const clang::SourceRange macroDefinitionSourceRange;
                 const std::vector<FunctionArgument> arguments;
-                const std::vector<std::uint32_t> classTypeArguments;
                 const bool hasClassTypeArguments;
                 const clang::QualType returnType;
                 const clang::SourceRange returnTypeSourceRange;
@@ -319,8 +319,7 @@ namespace TRAFO_NAMESPACE
                     isMacroExpansion(isThisAMacroExpansion(decl)),
                     macroDefinitionSourceRange(getSpellingSourceRange(sourceRange, decl.getASTContext())),
                     arguments(FunctionArgument::getArgumentsFromDecl(decl, definition)),
-                    classTypeArguments(getClassTypeArguments()),
-                    hasClassTypeArguments(classTypeArguments.size() > 0),
+                    hasClassTypeArguments(std::accumulate(arguments.begin(), arguments.end(), false, [] (const bool red, const FunctionArgument& argument) { return (red | argument.isClassType); })),
                     returnType(decl.getReturnType()),
                     returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
                     returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
@@ -340,8 +339,7 @@ namespace TRAFO_NAMESPACE
                     isMacroExpansion(isThisAMacroExpansion(decl)),
                     macroDefinitionSourceRange(getSpellingSourceRange(sourceRange, decl.getASTContext())),
                     arguments(FunctionArgument::getArgumentsFromDecl(decl, definition)),
-                    classTypeArguments(getClassTypeArguments()),
-                    hasClassTypeArguments(classTypeArguments.size() > 0),
+                    hasClassTypeArguments(std::accumulate(arguments.begin(), arguments.end(), false, [] (const bool red, const FunctionArgument& argument) { return (red | argument.isClassType); })),
                     returnType(decl.getReturnType()),
                     returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
                     returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
