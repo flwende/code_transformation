@@ -102,6 +102,17 @@ namespace MY_NAMESPACE
         T x;
         T y;
         T z;
+
+        template <typename X>
+        const A& foo(const A<X, 3, TT>& a) const
+        {
+            return *this;
+        }
+
+        const A& bar(const A& a) const 
+        {
+            return *this;
+        }
     };
 
     template <typename T, typename TT>

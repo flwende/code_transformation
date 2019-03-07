@@ -530,7 +530,7 @@ namespace TRAFO_NAMESPACE
 
             if (definition.hasCopyConstructor)
             {
-                const clang::CXXConstructorDecl& constructorDecl = definition.copyConstructor->decl;
+                const clang::CXXConstructorDecl& constructorDecl = definition.constructors[definition.indexCopyConstructor].decl;
                 const clang::ParmVarDecl* const parameter = constructorDecl.getParamDecl(0); // never nullptr
 
                 // dump the definition of the copy constructor starting at the parameter name
@@ -590,14 +590,15 @@ namespace TRAFO_NAMESPACE
             {
                 const Indentation insideClassIndent = definition.declaration.indent + 1;
                 const std::string indent(insideClassIndent.value, ' ');
+                const std::string extIndent((insideClassIndent + 1).value, ' ');
 
                 // in case of a C++ class, there must be at least one public access specifier
                 // as we require proxy class candidates have at least one public field!
                 clang::SourceLocation sourceLocation;
 
-                if (definition.publicAccess)
+                if (definition.indexPublicAccessSpecifiers.size() > 0)
                 {
-                    sourceLocation = definition.publicAccess->scopeBegin;
+                    sourceLocation = definition.accessSpecifiers[definition.indexPublicAccessSpecifiers[0]].scopeBegin;
 
                 }
                 else if (definition.declaration.isStruct)
@@ -611,11 +612,11 @@ namespace TRAFO_NAMESPACE
                 // insert constructor
                 if (definition.hasCopyConstructor)
                 {
-                    sourceLocation = getNextLine(definition.copyConstructor->sourceRange.getEnd(), context);
+                    sourceLocation = getNextLine(definition.constructors[definition.indexCopyConstructor].sourceRange.getEnd(), context);
                 }
-                else if (definition.ptrPublicConstructors.size() > 0)
+                else if (definition.indexPublicConstructors.size() > 0)
                 {
-                    sourceLocation = getNextLine(definition.ptrPublicConstructors.back()->sourceRange.getEnd(), context);
+                    sourceLocation = getNextLine(definition.constructors[definition.indexPublicConstructors.back()].sourceRange.getEnd(), context);
                 }
                 rewriter.insert(sourceLocation, generateConstructorClassFromProxyClass(definition));
 
@@ -638,23 +639,37 @@ namespace TRAFO_NAMESPACE
                         else
                         {
                             // duplicate the original function definition
-                            std::string functionString = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);                            
-                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionString);
+                            std::string functionDefinition = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);                            
+                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionDefinition);
 
                             // apply changes to the original function definition: replace argument types by proxy types
-                            for (const std::uint32_t i : method.classTypeArguments)
+                            for (const auto& classTypeArgument : method.indexClassTypeArguments)
                             {
-                                const auto& argument = method.arguments[i];
+                                const auto& argument = method.arguments[classTypeArgument];
                                 std::string typeName = argument.elementTypeName;
-                                findAndReplace(typeName, method.className, std::string(proxyNamespace) + std::string("::") + method.className + std::string("_proxy"), true, true);
 
-                                const std::string argumentName = (argument.isConst ? "const " : "") + typeName +
-                                    std::string(argument.isRReference ? "&&" : "") + 
-                                    std::string(argument.isLReference ? "&" : "") + 
-                                    std::string(argument.isPointer ? "* " : " ") + 
-                                    argument.name;
+                                if (argument.decl.hasDefaultArg())
+                                {
+                                    if (method.isDefinition)
+                                    {
+                                        const std::string variablDeclaration = extIndent + (argument.isConst ? "const " : "") + typeName + std::string(" ") +
+                                            argument.name + std::string(" = ") + dumpStmtToStringHumanReadable(argument.decl.getDefaultArg(), false) + std::string(";\n");
 
-                                rewriter.replace(argument.sourceRange, argumentName);
+                                        rewriter.insert(method.bodyInnerLocationBegin, variablDeclaration);
+                                    }
+                                }
+                                else
+                                {
+                                    findAndReplace(typeName, method.className, std::string(proxyNamespace) + std::string("::") + method.className + std::string("_proxy"), true, true);
+
+                                    const std::string argumentName = (argument.isConst ? "const " : "") + typeName +
+                                        std::string(argument.isRReference ? "&&" : "") + 
+                                        std::string(argument.isLReference ? "&" : "") + 
+                                        std::string(argument.isPointer ? "* " : " ") + 
+                                        argument.name;
+
+                                    rewriter.replace(argument.sourceRange, argumentName);
+                                }
                             }
                         }
                     }
@@ -672,8 +687,8 @@ namespace TRAFO_NAMESPACE
         {
             std::stringstream constructor;
             constructor << indent << definition.name << "_proxy(";
-            constructor << definition.ptrPublicFields[0]->typeName << "* ptr, const std::size_t n";
-            if (definition.fields.size() > definition.ptrPublicFields.size())
+            constructor << definition.fields[0].typeName << "* ptr, const std::size_t n";
+            if (definition.fields.size() > definition.indexPublicFields.size())
             {
                 for (const auto& field : definition.fields)
                 {
@@ -819,13 +834,13 @@ namespace TRAFO_NAMESPACE
                 proxyClassConstructors.emplace_back(generateProxyClassCopyConstructor(definition, std::string("\t")));
 
                 const std::uint32_t numConstructorsToBeInserted = proxyClassConstructors.size();
-                const std::uint32_t numConstructorLocationsAvailable = definition.ptrPublicConstructors.size();
+                const std::uint32_t numConstructorLocationsAvailable = definition.indexPublicConstructors.size();
                 const std::uint32_t numConstructorsInserted = std::min(numConstructorLocationsAvailable, numConstructorsToBeInserted);
                 for (std::uint32_t i = 0; i < numConstructorsInserted; ++i)
                 {
-                    rewriter.replace(definition.ptrPublicConstructors[i]->sourceRange, proxyClassConstructors[i]);
+                    rewriter.replace(definition.constructors[definition.indexPublicConstructors[i]].sourceRange, proxyClassConstructors[i]);
                 }
-                const clang::SourceLocation fallbackSourceLocation = (definition.publicAccess ? definition.publicAccess->scopeBegin : definition.innerLocBegin);
+                const clang::SourceLocation fallbackSourceLocation = (definition.indexPublicAccessSpecifiers.size() > 0 ? definition.accessSpecifiers[definition.indexPublicAccessSpecifiers[0]].scopeBegin : definition.innerLocBegin);
                 for (std::uint32_t i = numConstructorsInserted; i < proxyClassConstructors.size(); ++i)
                 {
                     rewriter.insert(fallbackSourceLocation, std::string("\n") + proxyClassConstructors[i]);

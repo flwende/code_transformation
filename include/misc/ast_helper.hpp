@@ -161,7 +161,7 @@ namespace TRAFO_NAMESPACE
             
             return streamBuffer.str(); // get content of 'streamBuffer'
         }
-
+        
         static std::string dumpDeclToString(const clang::Decl* const decl)
         {
             // return empty string if 'decl' is invalid
@@ -174,7 +174,7 @@ namespace TRAFO_NAMESPACE
 
             return streamBuffer.str(); // get content of 'streamBuffer'
         }
-
+        */
         static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
             // return empty string if 'stmt' is invalid
@@ -192,7 +192,7 @@ namespace TRAFO_NAMESPACE
         {
             return dumpStmtToStringHumanReadable(stmt, clang::LangOptions(), insertLeadingNewline);
         }
-
+        /*
         static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
             // return empty string if 'decl' is invalid
