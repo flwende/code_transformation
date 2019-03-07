@@ -9,6 +9,7 @@
 #include <iostream>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 #include <misc/ast_helper.hpp>
@@ -418,7 +419,7 @@ namespace TRAFO_NAMESPACE
                                             ++j;
                                         }
                                     }
-
+                                    
                                     if (isTypeParameter)
                                     {
                                         *isTypeParameter = true;
@@ -933,14 +934,11 @@ namespace TRAFO_NAMESPACE
                     if (isProxyClassCandidate)
                     {
                         // is this a homogeneous structured type?
-                        for (const auto& field : fields)
-                        {
-                            if (field.typeName != fields[0].typeName)
-                            {
-                                isHomogeneous = false;
-                                break;
-                            }
-                        }
+                        isHomogeneous = std::accumulate(fields.begin(), fields.end(), true, 
+                            [this] (const bool red, const Field& field) 
+                            { 
+                                return red & (field.typeName == fields[0].typeName); 
+                            });
 
                         const std::string className = name + templateParameterString;
                         const std::string classNameInternal = name + templateParameterStringInternal;
