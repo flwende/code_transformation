@@ -553,7 +553,7 @@ namespace TRAFO_NAMESPACE
             return constructorDefinition.str();
         }
 /*
-        std::string createMethodWithProxyArguments(const internal::ClassMetaData::CXXMethod& method)
+        std::string createMethodWithProxyArguments(const internal::ClassMetaData::Function& method)
         {
             clang::ASTContext& context = method.decl.getASTContext();
             const clang::SourceManager& sourceManager = context.getSourceManager();
@@ -623,11 +623,10 @@ namespace TRAFO_NAMESPACE
                 // insert methods that have the class type as argument type
                 for (const auto& method : definition.cxxMethods)
                 {
-                    #if !defined(bla)
+                    const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
+
                     if (method.hasClassTypeArguments)
                     { 
-                        const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
-
                         if (method.isMacroExpansion)
                         {
                             std::string macroString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);                            
@@ -638,42 +637,73 @@ namespace TRAFO_NAMESPACE
                         }
                         else
                         {
-                            // duplicate the original function definition
-                            std::string functionDefinition = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);                            
-                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionDefinition);
+                            // duplicate the original function definition and insert it only if we have to change argument types in the orignal definition
+                            // NOTE 1: this must not be the case if the class-type arguments have default values!
+                            const std::string originalFunctionDefinition = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);
+                            bool insertOriginalDefinition = false;
 
-                            // apply changes to the original function definition: replace argument types by proxy types
-                            for (const auto& classTypeArgument : method.indexClassTypeArguments)
+                            // create new function
+                            std::stringstream functionSignature;
+                            bool insertNewDefinition = false;
+
+                            functionSignature << method.signatureString[0] << "(";
+
+                            for (std::uint32_t i = 0; i < method.arguments.size(); ++i)
                             {
-                                const auto& argument = method.arguments[classTypeArgument];
-                                std::string typeName = argument.elementTypeName;
+                                const auto& argument = method.arguments[i];
 
-                                if (argument.decl.hasDefaultArg())
+                                if (argument.isClassType)
                                 {
-                                    if (method.isDefinition)
-                                    {
-                                        const std::string variablDeclaration = extIndent + (argument.isConst ? "const " : "") + typeName + std::string(" ") +
-                                            argument.name + std::string(" = ") + dumpStmtToStringHumanReadable(argument.decl.getDefaultArg(), false) + std::string(";\n");
+                                    std::string argumentTypeName = argument.elementTypeName;
+                                    findAndReplace(argumentTypeName, method.className, proxyTypeName, true, true);
 
-                                        rewriter.insert(method.bodyInnerLocationBegin, variablDeclaration);
-                                    }
-                                }
-                                else
-                                {
-                                    findAndReplace(typeName, method.className, std::string(proxyNamespace) + std::string("::") + method.className + std::string("_proxy"), true, true);
-
-                                    const std::string argumentName = (argument.isConst ? "const " : "") + typeName +
+                                    const std::string argumentString = (argument.isConst ? "const " : "") + argumentTypeName +
                                         std::string(argument.isRReference ? "&&" : "") + 
                                         std::string(argument.isLReference ? "&" : "") + 
                                         std::string(argument.isPointer ? "* " : " ") + 
                                         argument.name;
 
-                                    rewriter.replace(argument.sourceRange, argumentName);
+                                    if (argument.decl.hasDefaultArg())
+                                    {
+                                        // 1. let is as is in original function
+
+                                        // 2. create proxy argument in new function
+                                        functionSignature << (i > 0 ? ", " : "") << argumentString;
+                                        insertNewDefinition = true;
+                                    }
+                                    else
+                                    {
+                                        // 1. replace it by proxy argument in original function
+                                        rewriter.replace(argument.sourceRange, argumentString);
+                                        insertOriginalDefinition = true;
+
+                                        // 2. create proxy argument in new function
+                                        functionSignature << (i > 0 ? ", " : "") << argumentString;
+                                    }
                                 }
+                                else
+                                {
+                                    functionSignature << (i > 0 ? ", " : "") << dumpSourceRangeToString(method.signature[i + 1], sourceManager);
+                                }
+
+                                if ((i + 1) ==  method.arguments.size())
+                                {
+                                    functionSignature << (method.isConst ? ") const\n" : ")\n");
+                                }
+                            }
+                            
+                            if (insertNewDefinition)
+                            {
+                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionSignature.str());
+                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + dumpSourceRangeToString(method.extendedBodySourceRange, sourceManager));
+                            }
+
+                            if (insertOriginalDefinition)
+                            {
+                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + originalFunctionDefinition);
                             }
                         }
                     }
-                    #endif
                 }
             }
             

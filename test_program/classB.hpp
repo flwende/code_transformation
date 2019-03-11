@@ -46,13 +46,13 @@ namespace fw
         public:
             T w;
 
-            double len(const B& b, const std::size_t idx, const B c = 2.0)
+            double len(const std::size_t idx, const B c = 2.0)
             {
                 return 0.0;
             }
 
             template <typename TT>
-            double len(const B<TT>& b, const std::size_t idx, const B c = 2.0)
+            double len ( const B<TT>&   b, const std::size_t idx, const B c = 2.0)
             {
                 return 0.0;
             }

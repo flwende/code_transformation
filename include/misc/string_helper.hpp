@@ -32,10 +32,9 @@ namespace TRAFO_NAMESPACE
             // Note 2: the last capture is not part of the overall regular expression (?=..)
             const std::string regPrefix = std::string(matchWholeWord ? "(^|[^a-zA-Z0-9_])" : "()");
             const std::string regSuffix = std::string(matchWholeWord ? "(?=$|[^a-zA-Z0-9_])" : "()");
-            std::regex regExpr(regPrefix + findString + regSuffix);
+            const std::regex regExpr(regPrefix + findString + regSuffix);
             std::smatch regMatch;
-            std::string suffixString(input);
-            bool match = false;
+            const std::string suffixString(input);
 
             return std::regex_search(suffixString, regMatch, regExpr);
         }        
@@ -50,7 +49,7 @@ namespace TRAFO_NAMESPACE
             // Note 2: the last capture is not part of the overall regular expression (?=..)
             const std::string regPrefix = std::string(matchWholeWord ? "(^|[^a-zA-Z0-9_])" : "()");
             const std::string regSuffix = std::string(matchWholeWord ? "(?=$|[^a-zA-Z0-9_])" : "()");
-            std::regex regExpr(regPrefix + findString + regSuffix);
+            const std::regex regExpr(regPrefix + findString + regSuffix);
             std::smatch regMatch;
             std::string suffixString(input);
             bool match = false;
@@ -94,7 +93,16 @@ namespace TRAFO_NAMESPACE
         {
             std::string output(input);
 
-            output.erase(std::remove_if(output.begin(), output.end(), ::isspace), output.end());
+            output.erase(std::remove_if(output.begin(), output.end(), [] (const char c) { return std::isspace(c); }), output.end());
+
+            return output;
+        }
+
+        static std::string removeNewline(const std::string& input)
+        {
+            std::string output(input);
+
+            output.erase(std::remove_if(output.begin(), output.end(), [] (const char c) { return (c == '\n'); }), output.end());
 
             return output;
         }

@@ -134,6 +134,8 @@ namespace TRAFO_NAMESPACE
 
         static clang::SourceRange extendSourceRangeByLines(const clang::SourceRange& sourceRange, const std::size_t numLines, clang::ASTContext& context)
         {
+            if (!sourceRange.isValid()) return clang::SourceRange();
+
             const clang::SourceLocation beginLoc = sourceRange.getBegin();
             const clang::SourceManager& sourceManager = context.getSourceManager();
             const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(beginLoc, context));
@@ -234,7 +236,7 @@ namespace TRAFO_NAMESPACE
             return dumpSourceRangeToString(clang::SourceRange(beginOfLine, endOfLine), context.getSourceManager());
         }
 
-        static clang::SourceLocation getLocationOfFirstOccurence(const clang::SourceRange& sourceRange, clang::ASTContext& context, const char character, const std::uint32_t lineOffset = 0, const std::uint32_t colOffset = 0)
+        static clang::SourceLocation getLocationOfOccurrence(const clang::SourceRange& sourceRange, clang::ASTContext& context, const std::string& findString, const std::uint32_t lineOffset = 0, const std::uint32_t colOffset = 0, const bool getLastOccurrence = false)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
             
@@ -247,7 +249,7 @@ namespace TRAFO_NAMESPACE
             const clang::FileID fid = sourceManager.getFileID(getSpellingSourceLocation(declSourceLocation, context));
             const clang::SourceLocation EOFLocation = sourceManager.getLocForEndOfFile(fid);
             const clang::FullSourceLoc fullEOFLocation = context.getFullLoc(EOFLocation);
-            const std::uint32_t lineEOF = fullEOFLocation.getSpellingLineNumber();
+            const std::uint32_t lineEOF = std::min(getSpellingLineNumber(sourceRange.getEnd(), context), fullEOFLocation.getSpellingLineNumber() - 1);
 
             // default return value: invalid result location!
             clang::SourceLocation result;
@@ -261,17 +263,18 @@ namespace TRAFO_NAMESPACE
                 
                 // process the source code line by line
                 const std::uint32_t iStart = lineDecl + lineOffset;
-                for (std::uint32_t i = lineDecl; i < lineEOF; ++i)
+                for (std::uint32_t i = lineDecl; i <= lineEOF; ++i)
                 {
                     if (std::getline(sourceTextStream, thisLine, '\n'))
                     {
                         if (i < iStart) continue;
 
-                        const std::string::size_type pos = thisLine.find(character, (i == iStart ? colOffset : 0));
+                        const std::string::size_type pos = thisLine.find(findString, (i == iStart ? (colOffset + getSpellingColumnNumber(sourceRange.getBegin(), context)) : 0));
                         // stop, if the opening brace has been found
                         if (pos != std::string::npos)
                         {  
-                            return sourceManager.translateLineCol(fid, i, pos + 1);
+                            result = sourceManager.translateLineCol(fid, i, pos + 1);
+                            if (!getLastOccurrence) break;
                         }
                     }
                 }
@@ -280,7 +283,17 @@ namespace TRAFO_NAMESPACE
             return result;
         }
 
-        static clang::SourceRange getSourceRangeWithClosingCharacter(const clang::SourceRange& sourceRange, const char character, clang::ASTContext& context, const bool withIndentation = true)
+        static clang::SourceLocation getLocationOfFirstOccurrence(const clang::SourceRange& sourceRange, clang::ASTContext& context, const std::string& findString, const std::uint32_t lineOffset = 0, const std::uint32_t colOffset = 0)
+        {
+            return getLocationOfOccurrence(sourceRange, context, findString, lineOffset, colOffset, false);
+        }
+
+        static clang::SourceLocation getLocationOfLastOccurrence(const clang::SourceRange& sourceRange, clang::ASTContext& context, const std::string& findString, const std::uint32_t lineOffset = 0, const std::uint32_t colOffset = 0)
+        {
+            return getLocationOfOccurrence(sourceRange, context, findString, lineOffset, colOffset, true);
+        }
+
+        static clang::SourceRange getSourceRangeWithClosingCharacter(const clang::SourceRange& sourceRange, const std::string& findString, clang::ASTContext& context, const bool withIndentation = true)
         {
             if (!sourceRange.isValid()) return sourceRange;
 
@@ -289,7 +302,7 @@ namespace TRAFO_NAMESPACE
             const std::uint32_t lineBegin = getSpellingLineNumber(beginLocation, context);
             const std::uint32_t lineEnd = getSpellingLineNumber(endLocation, context);
             const std::uint32_t columnEnd = getSpellingColumnNumber(endLocation, context);
-            const clang::SourceLocation colonLocation = getLocationOfFirstOccurence(sourceRange, context, character, (lineEnd - lineBegin), columnEnd);
+            const clang::SourceLocation colonLocation = getLocationOfFirstOccurrence(sourceRange, context, findString, (lineEnd - lineBegin), columnEnd);
 
             return clang::SourceRange(withIndentation ? beginLocation : getBeginOfLine(beginLocation, context), colonLocation);
         }

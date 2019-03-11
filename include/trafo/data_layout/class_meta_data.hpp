@@ -161,7 +161,7 @@ namespace TRAFO_NAMESPACE
             };
 
             // forward declaration
-            class CXXMethod;
+            class Function;
 
             class FunctionArgument
             {
@@ -254,11 +254,11 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-            class CXXMethod
+            class Function
             {
                 friend class FunctionArgument;
 
-                std::string getClassName(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
+                std::string getClassName(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr) const
                 {
                     if (definition)
                     {
@@ -272,7 +272,7 @@ namespace TRAFO_NAMESPACE
                     return std::string("");
                 }
 
-                std::vector<std::uint32_t> getClassTypeArguments()
+                std::vector<std::uint32_t> getClassTypeArguments() const 
                 {
                     std::vector<std::uint32_t> classTypeArguments;
                     
@@ -287,6 +287,51 @@ namespace TRAFO_NAMESPACE
                     return classTypeArguments;
                 }
 
+                std::vector<clang::SourceRange> getSignature() const
+                {
+                    std::vector<clang::SourceRange> signature;
+
+                    if (!isMacroExpansion)
+                    {
+                        signature.reserve(arguments.size() + 2);
+                        signature.emplace_back(sourceRange.getBegin(), getLocationOfFirstOccurrence(sourceRange, decl.getASTContext(), name).getLocWithOffset(name.length()));
+
+                        for (std::uint32_t i = 0; i < arguments.size(); ++i)
+                        {
+                            
+                            if ((i + 1) < arguments.size())
+                            {
+                                signature.emplace_back(arguments[i].sourceRange.getBegin(), 
+                                    getLocationOfLastOccurrence(clang::SourceRange(arguments[i].sourceRange.getBegin(), arguments[i + 1].sourceRange.getBegin()), decl.getASTContext(), std::string(",")));                           
+                            }
+                            else
+                            {
+                                signature.emplace_back(arguments[i].sourceRange.getBegin(), 
+                                    getLocationOfLastOccurrence(clang::SourceRange(arguments[i].sourceRange.getBegin(), bodySourceRange.getBegin()), decl.getASTContext(), std::string(")")));                           
+                            }
+                        }
+
+                        // skip ')': it is the character we used for the detection of the last argument
+                        signature.emplace_back(signature[arguments.size()].getEnd().getLocWithOffset(1), bodySourceRange.getBegin());
+                    }
+
+                    return signature;
+                }
+
+                std::vector<std::string> getSignatureString() const
+                {
+                    std::vector<std::string> signatureString;
+
+                    signatureString.reserve(signature.size());
+
+                    for (std::uint32_t i = 0; i < signature.size(); ++i)
+                    {   
+                        signatureString.push_back(dumpSourceRangeToString(signature[i], decl.getASTContext().getSourceManager()));
+                    }
+
+                    return signatureString;
+                }
+
             public:
 
                 const clang::FunctionDecl& decl;
@@ -297,7 +342,10 @@ namespace TRAFO_NAMESPACE
                 const std::string name;
                 const std::string className;
                 const bool isDefinition;
+                const bool isConst;
                 const clang::Stmt* body;
+                const clang::SourceRange bodySourceRange;
+                const clang::SourceRange extendedBodySourceRange;
                 const clang::SourceLocation bodyInnerLocationBegin;
                 const bool isFunctionTemplate;
                 const bool isMacroExpansion;
@@ -305,12 +353,16 @@ namespace TRAFO_NAMESPACE
                 const std::vector<FunctionArgument> arguments;
                 const std::vector<std::uint32_t> indexClassTypeArguments;
                 const bool hasClassTypeArguments;
+                const bool classTypeArgumentsHaveDefaultArg;
+                const std::vector<clang::SourceRange> signature;
+                const clang::SourceRange signatureSourceRange;
+                const std::vector<std::string> signatureString;
                 const clang::QualType returnType;
                 const clang::SourceRange returnTypeSourceRange;
                 const std::string returnTypeName;
                 const bool returnsClassType;
 
-                CXXMethod(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
+                Function(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
                     :
                     decl(decl),
                     cxxMethodDecl(&decl),
@@ -320,7 +372,10 @@ namespace TRAFO_NAMESPACE
                     name(getNameBeforeMacroExpansion(decl, ClassMetaData::preprocessor)),
                     className(getClassName(decl, definition)),
                     isDefinition(decl.isThisDeclarationADefinition()),
+                    isConst(decl.isConst()),
                     body(isDefinition ? decl.getBody() : nullptr),
+                    bodySourceRange(isDefinition ? body->getSourceRange() : clang::SourceRange()),
+                    extendedBodySourceRange(extendSourceRangeByLines(bodySourceRange, 1, decl.getASTContext())),
                     bodyInnerLocationBegin(isDefinition ? getNextLine(body->getBeginLoc(), decl.getASTContext()) : clang::SourceLocation()), 
                     isFunctionTemplate(false),
                     isMacroExpansion(isThisAMacroExpansion(decl)),
@@ -328,13 +383,22 @@ namespace TRAFO_NAMESPACE
                     arguments(FunctionArgument::getArgumentsFromDecl(decl, definition)),
                     indexClassTypeArguments(getClassTypeArguments()),
                     hasClassTypeArguments(indexClassTypeArguments.size() > 0),
+                    classTypeArgumentsHaveDefaultArg(std::accumulate(arguments.begin(), arguments.end(), false, 
+                        [] (const bool red, const FunctionArgument& argument) 
+                        { 
+                            return (red | (argument.isClassType && argument.decl.hasDefaultArg()));
+                        })),
+                    signature(getSignature()),
+                    //signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature.front().getBegin() , signature.back().getEnd()) : clang::SourceRange()),
+                    signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature[0].getBegin() , signature[signature.size() - 1].getEnd()) : clang::SourceRange()),
+                    signatureString(getSignatureString()),
                     returnType(decl.getReturnType()),
                     returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
                     returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
                     returnsClassType(decl.isNoReturn() ? false : (returnTypeName == className))
                 { ; }
 
-                CXXMethod(const clang::FunctionDecl& decl, const std::string className = std::string(""), const Definition* definition = nullptr, const bool isFunctionTemplateDecl = false)
+                Function(const clang::FunctionDecl& decl, const std::string className = std::string(""), const Definition* definition = nullptr, const bool isFunctionTemplateDecl = false)
                     :
                     decl(decl),
                     cxxMethodDecl(nullptr),
@@ -344,7 +408,10 @@ namespace TRAFO_NAMESPACE
                     name(getNameBeforeMacroExpansion(decl, ClassMetaData::preprocessor)),
                     className(className),
                     isDefinition(decl.isThisDeclarationADefinition()),
+                    isConst(false),
                     body(isDefinition ? decl.getBody() : nullptr),
+                    bodySourceRange(isDefinition ? body->getSourceRange() : clang::SourceRange()),
+                    extendedBodySourceRange(extendSourceRangeByLines(bodySourceRange, 1, decl.getASTContext())),
                     bodyInnerLocationBegin(isDefinition ? getNextLine(body->getBeginLoc(), decl.getASTContext()) : clang::SourceLocation()),
                     isFunctionTemplate(isFunctionTemplateDecl),
                     isMacroExpansion(isThisAMacroExpansion(decl)),
@@ -352,6 +419,15 @@ namespace TRAFO_NAMESPACE
                     arguments(FunctionArgument::getArgumentsFromDecl(decl, definition)),
                     indexClassTypeArguments(getClassTypeArguments()),
                     hasClassTypeArguments(indexClassTypeArguments.size() > 0),
+                    classTypeArgumentsHaveDefaultArg(std::accumulate(arguments.begin(), arguments.end(), false, 
+                        [] (const bool red, const FunctionArgument& argument) 
+                        { 
+                            return (red | (argument.isClassType && argument.decl.hasDefaultArg()));
+                        })),
+                    signature(getSignature()),
+                    //signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature.front().getBegin() , signature.back().getEnd()) : clang::SourceRange()),
+                    signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature[0].getBegin() , signature[signature.size() - 1].getEnd()) : clang::SourceRange()),
+                    signatureString(getSignatureString()),
                     returnType(decl.getReturnType()),
                     returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
                     returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
@@ -363,9 +439,15 @@ namespace TRAFO_NAMESPACE
                     std::cout << indent << "* name=" << name << " (of class " << className << ")" << std::endl;
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                     std::cout << indent << "\t+-> extended range: " << extendedSourceRange.printToString(sourceManager) << std::endl;
+
                     if (isMacroExpansion)
                     {
                         std::cout << indent << "\t+-> macro definition range: " << macroDefinitionSourceRange.printToString(sourceManager) << std::endl;
+                    }
+
+                    if (isDefinition)
+                    {
+                        std::cout << indent << "\t+-> body range: " << bodySourceRange.printToString(sourceManager) << std::endl;
                     }
 
                     std::cout << indent << "\t+-> returns class type: " << (returnsClassType ? "yes" : "no") << std::endl;
@@ -551,7 +633,7 @@ namespace TRAFO_NAMESPACE
                     decl(decl),
                     sourceRange(decl.getSourceRange()),
                     name(getNameBeforeMacroExpansion(decl, ClassMetaData::preprocessor)),
-                    scopeBegin(getLocationOfFirstOccurence(sourceRange, decl.getASTContext(), '{')),
+                    scopeBegin(getLocationOfFirstOccurrence(sourceRange, decl.getASTContext(), std::string("{"))),
                     scopeEnd(decl.getRBraceLoc())
                 { ; }
 
@@ -747,7 +829,7 @@ namespace TRAFO_NAMESPACE
 
             class Definition
             {
-                friend class CXXMethod;
+                friend class Function;
 
                 void testIfProxyClassIsCandidate()
                 {
@@ -816,7 +898,7 @@ namespace TRAFO_NAMESPACE
                 std::vector<std::uint32_t> indexPrivateConstructors;
                 bool hasCopyConstructor;
                 std::uint32_t indexCopyConstructor;
-                std::vector<CXXMethod> cxxMethods;
+                std::vector<Function> cxxMethods;
                 bool isProxyClassCandidate;
                 bool isHomogeneous;
                 const Indentation indent;
@@ -1107,7 +1189,7 @@ namespace TRAFO_NAMESPACE
                 // declaration itself
                 if (!declaration.isDefinition)
                 {
-                    const clang::SourceLocation colonLocation = getLocationOfFirstOccurence(declaration.sourceRange, context, ';');
+                    const clang::SourceLocation colonLocation = getLocationOfFirstOccurrence(declaration.sourceRange, context, std::string(";"));
                     const clang::SourceRange declarationWithoutIndentation(getBeginOfLine(declaration.sourceRange.getBegin(), context), colonLocation);
                     adaptSourceRangeInformation(declarationWithoutIndentation);
                 }
@@ -1147,7 +1229,7 @@ namespace TRAFO_NAMESPACE
                     containsProxyClassCandidates = true;
 
                     // add definition source range
-                    const clang::SourceRange extendedDefinitionRange = getSourceRangeWithClosingCharacter(definition.sourceRange, ';', context, false);
+                    const clang::SourceRange extendedDefinitionRange = getSourceRangeWithClosingCharacter(definition.sourceRange, std::string(";"), context, false);
                     adaptSourceRangeInformation(extendedDefinitionRange);
 
                     return true;
