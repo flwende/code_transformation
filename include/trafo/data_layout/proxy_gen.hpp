@@ -517,34 +517,38 @@ namespace TRAFO_NAMESPACE
         {
             const Indentation insideClassIndent = definition.declaration.indent + 1;
             const std::string indent(insideClassIndent.value, ' ');
-            const std::uint32_t numTemplateParameters = definition.declaration.templateParameters.size();
             std::stringstream constructorDefinition;
 
-            if (numTemplateParameters > 0)
-            {
-                constructorDefinition << indent << "template " << definition.declaration.templateParameterDeclStringX << "\n";
-            }
-
-            // signature without the parameter name
-            constructorDefinition << indent << definition.name << "(const " << proxyNamespace << "::" << definition.name << "_proxy" << definition.declaration.templateParameterStringX <<  "& ";
+            constructorDefinition << indent;
 
             if (definition.hasCopyConstructor)
             {
-                const clang::CXXConstructorDecl& constructorDecl = definition.constructors[definition.indexCopyConstructor].decl;
-                const clang::ParmVarDecl* const parameter = constructorDecl.getParamDecl(0); // never nullptr
+                const auto& constructor = definition.constructors[definition.indexCopyConstructor];
+                const clang::ParmVarDecl* const parameter = constructor.decl.getParamDecl(0); // never nullptr
 
+                if (constructor.isTemplatedConstructor)
+                {
+                    constructorDefinition << dumpSourceRangeToString(constructor.templateSignatureSourceRange, definition.getSourceManager());
+                }
+                constructorDefinition << definition.name << "(const " << proxyNamespace << "::" << definition.name << "_proxy";
+                if (constructor.isTemplatedConstructor)
+                {
+                    const internal::ClassMetaData::FunctionArgument argument(*parameter, &definition);
+                    constructorDefinition << argument.templateParameters;
+                }
+                constructorDefinition << "& ";
+                
                 // dump the definition of the copy constructor starting at the parameter name
-                const clang::SourceRange everythingFromParmVarDeclName(parameter->getEndLoc(), constructorDecl.getEndLoc());
+                const clang::SourceRange everythingFromParmVarDeclName(parameter->getEndLoc(), constructor.decl.getEndLoc());
                 constructorDefinition << dumpSourceRangeToString(everythingFromParmVarDeclName, definition.getSourceManager());
-                if (constructorDecl.hasBody())
+                if (constructor.decl.hasBody())
                 {
                     constructorDefinition << "}";
                 }
             }
             else
             {
-                // parameter name + initializer list + no body
-                constructorDefinition << "other)\n";
+                constructorDefinition << definition.name << "(const " << proxyNamespace << "::" << definition.name << "_proxy& other)\n";
                 constructorDefinition << generateConstructorInitializerList(definition, std::string("other"), insideClassIndent + 1);
                 constructorDefinition << indent << "{ ; }";
             }
@@ -623,10 +627,10 @@ namespace TRAFO_NAMESPACE
                 // insert methods that have the class type as argument type
                 for (const auto& method : definition.cxxMethods)
                 {
-                    const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
-
                     if (method.hasClassTypeArguments)
                     { 
+                        const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
+
                         if (method.isMacroExpansion)
                         {
                             std::string macroString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);                            
@@ -657,7 +661,8 @@ namespace TRAFO_NAMESPACE
                                     std::string argumentTypeName = argument.elementTypeName;
                                     findAndReplace(argumentTypeName, method.className, proxyTypeName, true, true);
 
-                                    const std::string argumentString = (argument.isConst ? "const " : "") + argumentTypeName +
+                                    const std::string argumentString = (argument.isConst ? "const " : "") + argumentTypeName + 
+                                        (method.isFunctionTemplate ? argument.templateParameters : std::string("")) +
                                         std::string(argument.isRReference ? "&&" : "") + 
                                         std::string(argument.isLReference ? "&" : "") + 
                                         std::string(argument.isPointer ? "* " : " ") + 
@@ -665,7 +670,7 @@ namespace TRAFO_NAMESPACE
 
                                     if (argument.decl.hasDefaultArg())
                                     {
-                                        // 1. let is as is in original function
+                                        // 1. let it as is in original function
 
                                         // 2. create proxy argument in new function
                                         functionSignature << (i > 0 ? ", " : "") << argumentString;

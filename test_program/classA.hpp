@@ -54,7 +54,8 @@ namespace MY_NAMESPACE
         A() : x(0), y(0), z(0) { ; }
         A(const T c) : x(c), y(c), z(c) { ; }
         A(const T x, const T y, const T z) : x(x), y(y), z(z) { ; }
-        A(const A& rhs) : x(rhs.x), y(rhs.y), z(rhs.z) { ; }
+        template <typename X>
+        A(const A<X, 3, TT>& rhs) : x(rhs.x), y(rhs.y), z(rhs.z) { ; }
 
         A& operator=(const T c)
         {
@@ -64,7 +65,8 @@ namespace MY_NAMESPACE
             return *this;    
         }
 
-        A& operator=(const A& rhs)
+        template <typename X>
+        A& operator=(const A<X, 3, TT>& rhs)
         {
             x = rhs.x;
             y = rhs.y;
@@ -72,13 +74,13 @@ namespace MY_NAMESPACE
             return *this;    
         }
 
-        #define MACRO(OP, IN_T)                     \
-                                                    \
-        inline void operator OP (const IN_T & rhs)  \
-        {                                           \
-            x OP rhs.x;                             \
-            y OP rhs.y;                             \
-            z OP rhs.z;                             \
+        #define MACRO(OP, IN_T)                                 \
+        template <typename X>                                   \
+        inline void operator OP (const IN_T<X, 3, TT> & rhs)    \
+        {                                                       \
+            x OP rhs.x;                                         \
+            y OP rhs.y;                                         \
+            z OP rhs.z;                                         \
         }
         MACRO(+=, A)
         MACRO(-=, A)

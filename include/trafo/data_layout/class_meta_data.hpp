@@ -34,7 +34,7 @@ namespace TRAFO_NAMESPACE
             // forward declaration
             class Definition;
 
-        private:
+//        private:
 
             class AccessSpecifier
             {
@@ -128,43 +128,14 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-            struct Constructor
-            {
-                const clang::CXXConstructorDecl& decl;
-                const clang::SourceRange sourceRange;
-                const bool isDefaultConstructor;
-                const bool isCopyConstructor;
-                const AccessSpecifier::Kind access;
-                const bool isPublic;
-                const bool isProtected;
-                const bool isPrivate;
-
-                Constructor(const clang::CXXConstructorDecl& decl, const AccessSpecifier::Kind access)
-                    :
-                    decl(decl),
-                    sourceRange(decl.getSourceRange()),
-                    isDefaultConstructor(decl.isDefaultConstructor()),
-                    isCopyConstructor(decl.isCopyConstructor()),
-                    access(access),
-                    isPublic(access == AccessSpecifier::Kind::Public),
-                    isProtected(access == AccessSpecifier::Kind::Protected),
-                    isPrivate(access == AccessSpecifier::Kind::Private)
-                { ; }
-
-                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
-                {
-                    std::cout << indent << "* " << (isDefaultConstructor ? "default " : (isCopyConstructor ? "copy " : "")) << "constructor" << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
-                    std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
-                    std::cout << indent << "\t+-> has body: " << (decl.hasBody() ? "yes" : "no") << std::endl;
-                }
-            };
-
             // forward declaration
             class Function;
+            class Constructor;
 
             class FunctionArgument
             {
+                friend class Constructor;
+
                 clang::SourceRange getFunctionArgumentSourceRange(const clang::ParmVarDecl& decl)
                 {
                     return getSpellingSourceRange(decl.getSourceRange(), decl.getASTContext());
@@ -179,32 +150,43 @@ namespace TRAFO_NAMESPACE
                     return (qualType.getAsString().find("const", 0, 5) != std::string::npos);
                 }
 
-                std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr, const bool getElementTypeName = false)
+                static std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr, const bool getElementTypeName = false)
                 {
                     const clang::QualType qualType = decl.getType();
                     std::string typeName = (getElementTypeName ? qualType.getUnqualifiedType().getNonReferenceType().getAsString() : qualType.getAsString());
-
-                    if (definition)
-                    {
-                        const std::string className = definition->name + definition->templateParameterString;
-                        const std::string classNameInternal = definition->name + definition->templateParameterStringInternal;
-
-                        if (!findAndReplace(typeName, className, definition->name))
-                        {
-                            findAndReplace(typeName, classNameInternal, definition->name);
-                        }
-                    }
-
-                    // in some cases the 'getUnqualifiedType()' method does not work properly: remove cvr explicitly
+                    
                     if (getElementTypeName)
                     {
-                        findAndReplace(typeName, std::string("const"), std::string(""), true, true);
-                        findAndReplace(typeName, std::string("volatile"), std::string(""), true, true);
-                        findAndReplace(typeName, std::string("__restrict__"), std::string(""), true, true);
-                        typeName = removeSpaces(typeName);
+                        if (definition && find(typeName, definition->name))
+                        {
+                            typeName = definition->name;
+                        }
+                        else
+                        {
+                            // in some cases the 'getUnqualifiedType()' method does not work properly: remove cvr explicitly
+                            findAndReplace(typeName, std::string("const"), std::string(""), true, true);
+                            findAndReplace(typeName, std::string("volatile"), std::string(""), true, true);
+                            findAndReplace(typeName, std::string("__restrict__"), std::string(""), true, true);
+                            typeName = removeSpaces(typeName);
+                        }
+                        
                     }
 
                     return typeName;
+                }
+
+                static std::string getTemplateParameters(const clang::ParmVarDecl& decl, const Definition* definition = nullptr)
+                {
+                    const clang::QualType qualType = decl.getType();
+                    const std::string typeName = qualType.getUnqualifiedType().getNonReferenceType().getAsString();
+
+                    const std::size_t pos = typeName.find('<');
+                    if (pos != std::string::npos)
+                    {
+                        return typeName.substr(pos);
+                    }
+
+                    return {};
                 }
 
             public:
@@ -214,6 +196,7 @@ namespace TRAFO_NAMESPACE
                 const std::string name;
                 const std::string typeName;
                 const std::string elementTypeName;
+                const std::string templateParameters;
                 const bool isConst;
                 const bool isClassType;
                 const bool isLReference;
@@ -227,6 +210,7 @@ namespace TRAFO_NAMESPACE
                     name(decl.getNameAsString()),
                     typeName(getTypeName(decl, definition)),
                     elementTypeName(getTypeName(decl, definition, true)),
+                    templateParameters(getTemplateParameters(decl, definition)),
                     isConst(isConstQualified(decl)),
                     isClassType(definition ? (typeName.find(definition->name) != std::string::npos) : false),
                     isLReference(decl.getType()->isLValueReferenceType()),
@@ -250,6 +234,10 @@ namespace TRAFO_NAMESPACE
                 {
                     std::cout << indent << "* name=" << name << ", type=" << typeName << (isConst ? " (const qualified) " : "");
                     std::cout << ", element type=" << elementTypeName << std::endl;
+                    if (templateParameters.length())
+                    {
+                        std::cout << indent << "template parameters=" << templateParameters << std::endl;
+                    }
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                 }
             };
@@ -465,6 +453,58 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
+            class Constructor
+            {
+                bool isFunctionCopyConstructor(const clang::FunctionDecl& decl, const Definition* definition = nullptr)
+                {
+                    if (decl.getNumParams() != 1) return false;
+
+                    if (const clang::ParmVarDecl* parameter = decl.getParamDecl(0))
+                    {
+                        const std::string typeName = FunctionArgument::getTypeName(*decl.getParamDecl(0), definition, true);
+
+                        return (typeName.find(definition->name) != std::string::npos);
+                    }
+
+                    return false;
+                }
+
+            public:
+
+                const clang::FunctionDecl& decl;
+                const clang::SourceRange sourceRange;                
+                const bool isTemplatedConstructor;
+                const clang::SourceRange templateSignatureSourceRange;
+                const bool isDefaultConstructor;
+                const bool isCopyConstructor;
+                const AccessSpecifier::Kind access;
+                const bool isPublic;
+                const bool isProtected;
+                const bool isPrivate;
+
+                Constructor(const clang::FunctionDecl& decl, const AccessSpecifier::Kind access, const bool isTemplatedConstructor = false, const Definition* definition = nullptr)
+                    :
+                    decl(decl),
+                    sourceRange(isTemplatedConstructor ? decl.getDescribedFunctionTemplate()->getSourceRange() : decl.getSourceRange()),
+                    isTemplatedConstructor(isTemplatedConstructor),
+                    templateSignatureSourceRange(isTemplatedConstructor ? clang::SourceRange(sourceRange.getBegin(), decl.getLocation()) : clang::SourceRange()),
+                    isDefaultConstructor(isTemplatedConstructor ? false : static_cast<const clang::CXXConstructorDecl&>(decl).isDefaultConstructor()),
+                    isCopyConstructor(isTemplatedConstructor ? isFunctionCopyConstructor(decl, definition) : static_cast<const clang::CXXConstructorDecl&>(decl).isCopyConstructor()),
+                    access(access),
+                    isPublic(access == AccessSpecifier::Kind::Public),
+                    isProtected(access == AccessSpecifier::Kind::Protected),
+                    isPrivate(access == AccessSpecifier::Kind::Private)
+                { ; }
+
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
+                {
+                    std::cout << indent << "* " << (isDefaultConstructor ? "default " : (isCopyConstructor ? "copy " : "")) << "constructor" << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
+                    std::cout << indent << "\t+-> has body: " << (decl.hasBody() ? "yes" : "no") << std::endl;
+                }
+            };
+
             class TemplateParameter
             {
                 static std::string getArgumentName(const clang::TemplateArgument& arg, const std::vector<TemplateParameter>& templateParameters, const bool internalRepresentation = false, bool* isTypeParameter = nullptr)
@@ -569,7 +609,7 @@ namespace TRAFO_NAMESPACE
                     return templateParameters;
                 }
 
-                static std::string getPartialSpecializationArgumentString(const clang::CXXRecordDecl& decl, const std::vector<TemplateParameter>& templateParameters, const bool internalRepresentation = false)
+                static std::string getPartialSpecializationArgumentString(const clang::CXXRecordDecl& decl, const std::vector<TemplateParameter>& templateParameters, const bool internalRepresentation = false, const std::string namePrefix = std::string(""))
                 {
                     std::stringstream templateArgumentStringStream;
 
@@ -582,6 +622,11 @@ namespace TRAFO_NAMESPACE
                             templateArgumentStringStream << "<";
                             for (std::uint32_t i = 0; i < iMax; ++i)
                             {
+                                if (templateParameters[i].isTypeParameter)
+                                {
+                                    templateArgumentStringStream << namePrefix;
+                                }
+
                                 const std::string argName = getArgumentName(args[i], templateParameters, internalRepresentation);
                                 templateArgumentStringStream << argName << ((i + 1) < iMax ? ", " : ">");
                             }
@@ -742,7 +787,7 @@ namespace TRAFO_NAMESPACE
                     templateParameterListSourceRange(TemplateParameter::getParameterListSourceRange(classTemplateDecl)),
                     templateParameterDeclString(getTemplateParamerString(true)),
                     templateParameterDeclStringX(getTemplateParamerString(true, std::string("_"))),
-                    templateParameterString(getTemplateParamerString()),
+                    templateParameterString(getTemplateParamerString(false)),
                     templateParameterStringX(getTemplateParamerString(false, std::string("_"))),
                     isDefinition(isDefinition),
                     isStruct(cxxRecordDecl->isStruct()),
@@ -882,6 +927,7 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceRange nameSourceRange;             
                 const bool isTemplatePartialSpecialization;
                 const std::string templateParameterString;
+                const std::string templateParameterStringX;
                 const std::string templateParameterStringInternal;
                 const std::vector<std::pair<std::string, bool>> templatePartialSpecializationArguments;
                 std::vector<Field> fields;
@@ -920,6 +966,7 @@ namespace TRAFO_NAMESPACE
                     nameSourceRange(decl.getLocation()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
                     templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters) : declaration.templateParameterString),
+                    templateParameterStringX(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, false, std::string("_")) : declaration.templateParameterStringX),
                     templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, true) : declaration.templateParameterString),
                     templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateParameters) : std::vector<std::pair<std::string, bool>>()),
                     hasCopyConstructor(false),
@@ -991,6 +1038,30 @@ namespace TRAFO_NAMESPACE
                     ADD_MATCHER(Private);
                 #undef ADD_MATCHER
 
+                #define ADD_MATCHER(ACCESS) \
+                    matcher.addMatcher(functionTemplateDecl(is ## ACCESS()).bind("templatedConstructorDecl"), \
+                        [this] (const MatchFinder::MatchResult& result) mutable \
+                        { \
+                            if (const clang::FunctionTemplateDecl* const decl = result.Nodes.getNodeAs<clang::FunctionTemplateDecl>("templatedConstructorDecl")) \
+                            { \
+                                if (find(decl->getNameAsString(), name, true)) \
+                                { \
+                                    index ## ACCESS ## Constructors.push_back(constructors.size()); \
+                                    constructors.emplace_back(*decl->getTemplatedDecl(), AccessSpecifier::Kind::ACCESS, true, this); \
+                                    if (!hasCopyConstructor && constructors.back().isCopyConstructor) \
+                                    { \
+                                        hasCopyConstructor = true; \
+                                        indexCopyConstructor = index ## ACCESS ## Constructors.back(); \
+                                    } \
+                                } \
+                            } \
+                        }, &decl)
+
+                    ADD_MATCHER(Public);
+                    ADD_MATCHER(Protected);
+                    ADD_MATCHER(Private);
+                #undef ADD_MATCHER
+
                     // get templated methods
                     matcher.addMatcher(functionTemplateDecl().bind("functionTemplateDecl"),
                         [this] (const MatchFinder::MatchResult& result) mutable
@@ -1012,7 +1083,7 @@ namespace TRAFO_NAMESPACE
                     // proxy class candidate?
                     testIfProxyClassIsCandidate();
 
-                    // do this only if is is a proxy class candidate
+                    // do this only if it is a proxy class candidate
                     if (isProxyClassCandidate)
                     {
                         // is this a homogeneous structured type?
@@ -1022,13 +1093,13 @@ namespace TRAFO_NAMESPACE
                                 return red & (field.typeName == fields[0].typeName); 
                             });
 
-                        const std::string className = name + templateParameterString;
-                        const std::string classNameInternal = name + templateParameterStringInternal;
-
+                        // get non-templated method declarations 
                         for (const auto& method : decl.methods())
                         {
+                            // skip auto-generated methods
                             if (!method->isUserProvided()) continue;
 
+                            // skip constructors and destructors
                             const clang::DeclarationName::NameKind kind = method->getDeclName().getNameKind();
                             if (kind == clang::DeclarationName::NameKind::CXXConstructorName || kind == clang::DeclarationName::NameKind::CXXDestructorName) continue;
 
@@ -1070,6 +1141,7 @@ namespace TRAFO_NAMESPACE
                     if (isTemplatePartialSpecialization)
                     {
                         std::cout << indent << "\t|\t* arguments: " << templateParameterString << " (internal: " << templateParameterStringInternal << ")" << std::endl;
+                        std::cout << indent << "\t|\t* arguments x: " << templateParameterStringX << std::endl;
                     }
                     
                     if (accessSpecifiers.size() > 0)
