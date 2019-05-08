@@ -44,7 +44,7 @@ namespace MY_NAMESPACE
     template <typename T, typename TT>
     class A<T, 3, TT>
     {
-        static_assert(!std::is_const<T>::value, "error: A<const T, 1, TT> is not allowed");
+        //static_assert(!std::is_const<T>::value, "error: A<const T, 3, TT> is not allowed");
 
         using fundamental_type = T;
         static constexpr std::size_t D = 3;

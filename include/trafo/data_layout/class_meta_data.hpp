@@ -86,55 +86,15 @@ namespace TRAFO_NAMESPACE
                 }
             };
 
-            class Field
-            {
-            public:
-                            
-                const clang::FieldDecl& decl;
-                const clang::SourceRange sourceRange;
-                const std::string name;
-                const clang::Type* const type;
-                const std::string typeName;
-                const AccessSpecifier::Kind access;
-                const bool isPublic;
-                const bool isProtected;
-                const bool isPrivate;
-                const bool isConst;
-                const bool isTemplateTypeParmType;
-                const bool isFundamentalOrTemplated;
-                
-                Field(const clang::FieldDecl& decl, const AccessSpecifier::Kind access)
-                    :
-                    decl(decl),
-                    sourceRange(decl.getSourceRange()),
-                    name(decl.getNameAsString()),
-                    type(decl.getType().getTypePtrOrNull()),
-                    typeName(decl.getType().getAsString()),
-                    access(access),
-                    isPublic(access == AccessSpecifier::Kind::Public),
-                    isProtected(access == AccessSpecifier::Kind::Protected),
-                    isPrivate(access == AccessSpecifier::Kind::Private),
-                    isConst(decl.getType().isConstQualified()),
-                    isTemplateTypeParmType(type ? type->isTemplateTypeParmType() : false),
-                    isFundamentalOrTemplated(type ? (type->isFundamentalType() || isTemplateTypeParmType) : false)
-                { ; }
-
-                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
-                {
-                    std::cout << indent << "* name=" << name << ", type=" << typeName << (isConst ? " (const qualified)" : "") << std::endl;
-                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
-                    std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
-                    std::cout << indent << "\t+-> fundamental or templated: " << (isFundamentalOrTemplated ? "yes" : "no") << std::endl;
-                }
-            };
-
             // forward declaration
             class Function;
             class Constructor;
+            class Field;
 
             class FunctionArgument
             {
                 friend class Constructor;
+                friend class Field;
 
                 clang::SourceRange getFunctionArgumentSourceRange(const clang::ParmVarDecl& decl)
                 {
@@ -239,6 +199,50 @@ namespace TRAFO_NAMESPACE
                         std::cout << indent << "template parameters=" << templateParameters << std::endl;
                     }
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                }
+            };
+
+            class Field
+            {
+            public:
+                            
+                const clang::FieldDecl& decl;
+                const clang::SourceRange sourceRange;
+                const std::string name;
+                const clang::Type* const type;
+                const std::string typeName;
+                const std::string elementTypeName;
+                const AccessSpecifier::Kind access;
+                const bool isPublic;
+                const bool isProtected;
+                const bool isPrivate;
+                const bool isConst;
+                const bool isTemplateTypeParmType;
+                const bool isFundamentalOrTemplated;
+                
+                Field(const clang::FieldDecl& decl, const AccessSpecifier::Kind access)
+                    :
+                    decl(decl),
+                    sourceRange(decl.getSourceRange()),
+                    name(decl.getNameAsString()),
+                    type(decl.getType().getTypePtrOrNull()),
+                    typeName(decl.getType().getAsString()),
+                    elementTypeName(decl.getType().getUnqualifiedType().getAsString()),
+                    access(access),
+                    isPublic(access == AccessSpecifier::Kind::Public),
+                    isProtected(access == AccessSpecifier::Kind::Protected),
+                    isPrivate(access == AccessSpecifier::Kind::Private),
+                    isConst(decl.getType().isConstQualified()),
+                    isTemplateTypeParmType(type ? type->isTemplateTypeParmType() : false),
+                    isFundamentalOrTemplated(type ? (type->isFundamentalType() || isTemplateTypeParmType) : false)
+                { ; }
+
+                void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
+                {
+                    std::cout << indent << "* name=" << name << ", type=" << typeName << (isConst ? " (const qualified)" : "") << std::endl;
+                    std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
+                    std::cout << indent << "\t+-> access: " << (isPublic ? "public" : (isProtected ? "protected" : "private")) << std::endl;
+                    std::cout << indent << "\t+-> fundamental or templated: " << (isFundamentalOrTemplated ? "yes" : "no") << std::endl;
                 }
             };
 
@@ -750,6 +754,7 @@ namespace TRAFO_NAMESPACE
             public:
         
                 const clang::SourceRange sourceRange;
+                const clang::SourceRange extendedSourceRange;
                 const clang::FileID fileId;
                 const clang::SourceLocation beginOfContainingFile;
                 const clang::SourceLocation endOfContainingFile;
@@ -763,11 +768,12 @@ namespace TRAFO_NAMESPACE
                 const std::string templateParameterDeclStringX;
                 const std::string templateParameterString;
                 const std::string templateParameterStringX;
+                const std::string templateConstParameterString;
                 const bool isDefinition;
                 const bool isStruct;
                 const bool isClass;
                 const Indentation indent;
-                
+
                 template <typename T>
                 Declaration(const T& decl, const bool isDefinition)
                     :
@@ -776,6 +782,7 @@ namespace TRAFO_NAMESPACE
                     context(cxxRecordDecl->getASTContext()),
                     sourceManager(context.getSourceManager()),
                     sourceRange(decl.getSourceRange()),
+                    extendedSourceRange({getBeginOfLine(sourceRange.getBegin(), context), getLocationOfLastOccurrence({sourceRange.getBegin(), getNextLine(sourceRange.getEnd(), context)}, context, std::string(";"), 0, 0).getLocWithOffset(1)}),
                     fileId(sourceManager.getFileID(decl.getLocation())),
                     beginOfContainingFile(sourceManager.getLocForStartOfFile(fileId)),
                     endOfContainingFile(sourceManager.getLocForEndOfFile(fileId)),
@@ -789,6 +796,7 @@ namespace TRAFO_NAMESPACE
                     templateParameterDeclStringX(getTemplateParamerString(true, std::string("_"))),
                     templateParameterString(getTemplateParamerString(false)),
                     templateParameterStringX(getTemplateParamerString(false, std::string("_"))),
+                    templateConstParameterString(getTemplateParamerString(false, std::string("const "))),
                     isDefinition(isDefinition),
                     isStruct(cxxRecordDecl->isStruct()),
                     isClass(cxxRecordDecl->isClass()),
@@ -920,6 +928,7 @@ namespace TRAFO_NAMESPACE
                 const Declaration& declaration;
                 const clang::CXXRecordDecl& decl;
                 const clang::SourceRange sourceRange;
+                const clang::SourceRange extendedSourceRange;
                 const clang::SourceLocation innerLocBegin;
                 const clang::SourceLocation innerLocEnd;
                 const clang::SourceRange innerSourceRange;
@@ -927,6 +936,7 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceRange nameSourceRange;             
                 const bool isTemplatePartialSpecialization;
                 const std::string templateParameterString;
+                const std::string templateConstParameterString;
                 const std::string templateParameterStringX;
                 const std::string templateParameterStringInternal;
                 const std::vector<std::pair<std::string, bool>> templatePartialSpecializationArguments;
@@ -959,6 +969,7 @@ namespace TRAFO_NAMESPACE
                     declaration(declaration),
                     decl(decl),
                     sourceRange(classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()),
+                    extendedSourceRange({getBeginOfLine(sourceRange.getBegin(), context), getLocationOfLastOccurrence({sourceRange.getBegin(), getNextLine(sourceRange.getEnd(), context)}, context, std::string(";"), 0, 0).getLocWithOffset(1)}),
                     innerLocBegin(decl.getBraceRange().getBegin().getLocWithOffset(1)),
                     innerLocEnd(decl.getBraceRange().getEnd()),
                     innerSourceRange(determineInnerSourceRange(decl)),
@@ -966,6 +977,7 @@ namespace TRAFO_NAMESPACE
                     nameSourceRange(decl.getLocation()),
                     isTemplatePartialSpecialization(isTemplatePartialSpecialization),
                     templateParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters) : declaration.templateParameterString),
+                    templateConstParameterString(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, false, std::string("const ")) : declaration.templateConstParameterString),
                     templateParameterStringX(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, false, std::string("_")) : declaration.templateParameterStringX),
                     templateParameterStringInternal(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArgumentString(decl, declaration.templateParameters, true) : declaration.templateParameterString),
                     templatePartialSpecializationArguments(isTemplatePartialSpecialization ? TemplateParameter::getPartialSpecializationArguments(decl, declaration.templateParameters) : std::vector<std::pair<std::string, bool>>()),
@@ -1190,6 +1202,7 @@ namespace TRAFO_NAMESPACE
             bool containsProxyClassCandidates;
             clang::SourceLocation topMostSourceLocation;
             clang::SourceLocation bottomMostSourceLocation;
+            const std::string filename;
             SourceRangeSet relevantSourceRanges;
         
         protected:
@@ -1205,7 +1218,8 @@ namespace TRAFO_NAMESPACE
                 name(decl.getNameAsString()),
                 containsProxyClassCandidates(false),
                 topMostSourceLocation(sourceManager.getLocForEndOfFile(fileId)),
-                bottomMostSourceLocation(sourceManager.getLocForStartOfFile(fileId))
+                bottomMostSourceLocation(sourceManager.getLocForStartOfFile(fileId)),
+                filename(sourceManager.getFilename(topMostSourceLocation).str())
             { ; }
 
         public:
@@ -1257,7 +1271,7 @@ namespace TRAFO_NAMESPACE
                     const clang::SourceRange untilRBrace(onlySpacesBeforeRBrace ? everythingUntilRBrace : clang::SourceRange(thisNamespace.scopeEnd));
                     adaptSourceRangeInformation(untilRBrace);
                 }
-
+                
                 // declaration itself
                 if (!declaration.isDefinition)
                 {

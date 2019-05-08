@@ -92,13 +92,24 @@ namespace TRAFO_NAMESPACE
             return sourceManager.translateLineCol(fileId, sourceLocationLineNumber, 1);
         }
 
-        static clang::SourceLocation getNextLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        static clang::SourceLocation getPreviousLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
         {
             const clang::SourceManager& sourceManager = context.getSourceManager();
             const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
             const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
-            const clang::SourceLocation nextLine = sourceManager.translateLineCol(fileId, sourceLocationLineNumber + 1, 1);
+            const clang::SourceLocation previousLine = sourceManager.translateLineCol(fileId, (sourceLocationLineNumber > 0 ? (sourceLocationLineNumber - 1) : sourceLocationLineNumber), 1);
 
+            return previousLine;
+        }
+
+        static clang::SourceLocation getNextLine(const clang::SourceLocation& sourceLocation, clang::ASTContext& context)
+        {
+            const clang::SourceManager& sourceManager = context.getSourceManager();
+            const clang::FileID fileId = sourceManager.getFileID(getSpellingSourceLocation(sourceLocation, context));
+            const std::uint32_t lineEOF = getSpellingLineNumber(sourceManager.getLocForEndOfFile(fileId), context);
+            const std::uint32_t sourceLocationLineNumber = getSpellingLineNumber(sourceLocation, context);
+            const clang::SourceLocation nextLine = (sourceLocationLineNumber == lineEOF ? sourceLocation : sourceManager.translateLineCol(fileId, sourceLocationLineNumber + 1, 1));
+            /*
             if (sourceLocationLineNumber == getSpellingLineNumber(nextLine, context))
             {
                 return sourceLocation.getLocWithOffset(1);
@@ -107,6 +118,8 @@ namespace TRAFO_NAMESPACE
             {
                 return nextLine;
             }
+            */
+            return nextLine;
         }
 
         static clang::SourceRange getSpellingSourceRange(const clang::SourceRange& sourceRange, clang::ASTContext& context)
@@ -260,7 +273,7 @@ namespace TRAFO_NAMESPACE
                 const std::string sourceText(linePtr);
                 std::istringstream sourceTextStream(sourceText);
                 std::string thisLine;
-                
+
                 // process the source code line by line
                 const std::uint32_t iStart = lineDecl + lineOffset;
                 for (std::uint32_t i = lineDecl; i <= lineEOF; ++i)
@@ -302,7 +315,7 @@ namespace TRAFO_NAMESPACE
             const std::uint32_t lineBegin = getSpellingLineNumber(beginLocation, context);
             const std::uint32_t lineEnd = getSpellingLineNumber(endLocation, context);
             const std::uint32_t columnEnd = getSpellingColumnNumber(endLocation, context);
-            const clang::SourceLocation colonLocation = getLocationOfFirstOccurrence(sourceRange, context, findString, (lineEnd - lineBegin), columnEnd);
+            const clang::SourceLocation colonLocation = getLocationOfFirstOccurrence(sourceRange, context, findString, (lineEnd - lineBegin), 0);
 
             return clang::SourceRange(withIndentation ? beginLocation : getBeginOfLine(beginLocation, context), colonLocation);
         }

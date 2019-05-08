@@ -11,6 +11,7 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include <fstream>
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -19,6 +20,7 @@
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <misc/ast_helper.hpp>
 #include <misc/matcher.hpp>
@@ -342,12 +344,12 @@ namespace TRAFO_NAMESPACE
                 });
 
             matcher.run(context);
-
+            /*
             for (const auto& declaration : declarations)
             {
                 declaration->printInfo(context.getSourceManager());
             }
-
+            */
             return (declarations.size() > 0);
         }
 
@@ -776,6 +778,7 @@ namespace TRAFO_NAMESPACE
 
             // some file related locations
             const clang::SourceManager& sourceManager = candidate->sourceManager;
+            clang::ASTContext& context = candidate->context;
             const clang::FileID fileId = candidate->getDeclaration().fileId;
             const clang::SourceLocation fileStart = sourceManager.getLocForStartOfFile(fileId);
             const clang::SourceLocation fileEnd = sourceManager.getLocForEndOfFile(fileId);
@@ -794,25 +797,36 @@ namespace TRAFO_NAMESPACE
             // remove everything that is not relevant for the proxy generation
             for (std::uint32_t i = 0; i < (numRelevantSourceRanges - 1); ++i)
             {
+
                 const clang::SourceLocation start = sourceRange->getEnd().getLocWithOffset(1);
                 const clang::SourceLocation end = (++sourceRange)->getBegin().getLocWithOffset(-1);
                 const clang::SourceRange toBeRemoved(start, end);
-                if (toBeRemoved.isValid())
+                if (toBeRemoved.isValid() && toBeRemoved.getBegin() != toBeRemoved.getEnd())
                 {
                     rewriter.remove(toBeRemoved);
+                    //rewriter.replace(toBeRemoved, std::string("\n"));
                 }
-            }            
+            }
 
             const clang::SourceRange toBeRemoved(sourceRange->getEnd().getLocWithOffset(1), fileEnd);
-            if (toBeRemoved.isValid())
+            if (toBeRemoved.isValid() && toBeRemoved.getBegin() != toBeRemoved.getEnd())
             {
                 rewriter.replace(toBeRemoved, std::string("\n"));
             }
 
             // declaration: replace class name by proxy class name
+            const std::string proxyNamespace = std::string("proxy_internal");
+
             const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
             if (!declaration.isDefinition)
             {
+                // insert proxy namespace
+                const Indentation Indent = declaration.indent;
+                const std::string indent(Indent.value, ' ');
+
+                rewriter.insert(declaration.extendedSourceRange.getBegin(), indent + std::string("namespace ") + proxyNamespace + std::string("\n") + indent + std::string("{\n"));
+                rewriter.insert(declaration.extendedSourceRange.getEnd(), indent + std::string("\n") + indent + std::string("}\n"));
+
                 rewriter.replace(declaration.nameSourceRange, declaration.name + std::string("_proxy"));
             }
 
@@ -820,8 +834,112 @@ namespace TRAFO_NAMESPACE
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
             for (const auto& definition : definitions)
             {
+                // insert proxy namespace
+                const Indentation Indent = definition.declaration.indent;
+                const std::string indent(Indent.value, ' ');
+
+                rewriter.insert(definition.extendedSourceRange.getBegin(), indent + std::string("namespace ") + proxyNamespace + std::string("\n") + indent + std::string("{\n"));
+                rewriter.insert(definition.extendedSourceRange.getEnd(), indent + std::string("\n") + indent + std::string("}\n"));
+
                 // replace class name by proxy class name
                 rewriter.replace(definition.nameSourceRange, definition.name + std::string("_proxy"));
+
+                // using statement for accessor and iterator
+                const Indentation ExtIndent = Indent + 1;
+                const std::string extIndent(ExtIndent.value, ' ');
+                const Indentation ExtExtIndent = ExtIndent + 1;
+                const std::string extExtIndent(ExtExtIndent.value, ' ');
+
+                if (!definition.declaration.isClass)
+                {
+                    rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("private:\n\n"));
+                }
+
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("template <typename _X, std::size_t _N, std::size_t _D, data_layout _L>\n") + extIndent + std::string("friend class XXX_NAMESPACE::internal::accessor;\n"));
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("template <typename _P, std::size_t _R>\n") + extIndent + std::string("friend class XXX_NAMESPACE::internal::iterator;\n"));
+
+                // insert meta data: type and const_type
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using type = ") + definition.name + std::string("_proxy") + definition.templateParameterString + std::string(";\n"));
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using const_type = ") + definition.name + std::string("_proxy") + definition.templateConstParameterString + std::string(";\n"));
+
+                // insert meta data: unqualified type
+                for (const auto& templateParamter : definition.declaration.templateParameters)
+                {
+                    if (!templateParamter.isTypeParameter) continue;
+
+                    const std::string parameterName = templateParamter.name;
+
+                    rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using ") + parameterName + std::string("_unqualified = typename std::remove_cv<") + parameterName + std::string(">::type;\n"));
+                }
+
+                // insert meta data: base pointer type?
+                std::stringstream basePointerStream;
+                basePointerStream << "\n" << extIndent << "using base_pointer = XXX_NAMESPACE::multi_pointer_";
+                if (definition.isHomogeneous)
+                {
+                    basePointerStream << "n<" << definition.fields[0].elementTypeName << ", " << std::to_string(definition.fields.size());
+                }
+                else
+                {
+                    basePointerStream << "inhomogeneous<";
+
+                    std::uint32_t fieldId = 0;
+                    for (const auto& field : definition.fields)
+                    {
+                        basePointerStream << (fieldId == 0 ? "" : ", ") << field.elementTypeName;
+                        ++fieldId;
+                    }
+                }
+                basePointerStream << ">;\n";
+                rewriter.insert(definition.innerLocBegin, basePointerStream.str());
+
+                // insert meta data: is const type?
+                std::stringstream isConstTypeStream;
+                isConstTypeStream << "\n" << extIndent << "static constexpr bool is_const_type = (";
+                std::uint32_t templateParameterId = 0;
+                for (const auto& templateParamter : definition.declaration.templateParameters)
+                {
+                    if (!templateParamter.isTypeParameter) continue;
+
+                    const std::string parameterName = templateParamter.name;
+
+                    isConstTypeStream << (templateParameterId == 0 ? "" : " || " ) << "std::is_const<" << parameterName << ">::value";
+                    ++templateParameterId;
+                }
+                isConstTypeStream << ");\n";
+                rewriter.insert(definition.innerLocBegin, isConstTypeStream.str());
+
+                // insert meta data: original type
+                std::stringstream originalTypeStream;
+                originalTypeStream << "\n" << extIndent << "using original_type = typename std::conditional<is_const_type,\n" << extExtIndent << "const " << definition.name << "<";
+                templateParameterId = 0;
+                for (const auto& templateParamter : definition.declaration.templateParameters)
+                {
+                    if (!templateParamter.isTypeParameter) continue;
+
+                    const std::string parameterName = templateParamter.name;
+
+                    originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
+                    ++templateParameterId;
+                }
+                originalTypeStream << ">,\n" << extExtIndent << definition.name << "<";
+                templateParameterId = 0;
+                for (const auto& templateParamter : definition.declaration.templateParameters)
+                {
+                    if (!templateParamter.isTypeParameter) continue;
+
+                    const std::string parameterName = templateParamter.name;
+
+                    originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
+                    ++templateParameterId;
+                }
+                originalTypeStream << ">>::type;\n";
+                rewriter.insert(definition.innerLocBegin, originalTypeStream.str());
+
+                if (!definition.declaration.isClass)
+                {
+                    rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("public:\n\n"));
+                }
 
                 continue;
 
@@ -887,31 +1005,40 @@ namespace TRAFO_NAMESPACE
         {
             // make a hard copy before applying any changes to the source code
             Rewriter proxyClassCreator(rewriter);
-
+        
             for (const auto& target : proxyClassTargets)
             {
                 if (!target->containsProxyClassCandidates) continue;
 
                 std::cout << "########################################################" << std::endl;
 
-                target->printInfo();
+                //target->printInfo();
                 
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);
 
-                // TODO: replace by writing back to file!
-                rewriter.getEditBuffer(target->fileId).write(llvm::outs());
+                //rewriter.getEditBuffer(target->fileId).write(llvm::outs());
+                std::string outputString;
+                llvm::raw_string_ostream outputStream(outputString);
+                rewriter.getEditBuffer(target->fileId).write(outputStream);
                 
+                std::string outputFilename(target->filename);
+                const std::size_t pos = outputFilename.rfind('/');
+                outputFilename.insert(pos != std::string::npos ? (pos + 1) : 0, "new_files/");
+                
+                std::ofstream out(outputFilename);
+                out << outputStream.str();
+                out.close();
+
                 std::cout << "########################################################" << std::endl;
-                /*
+                
                 // generate proxy class definition
                 generateProxyClassDefinition(target, proxyClassCreator, std::string("// my header\n"));
 
                 // TODO: replace by writing back to file!
                 proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
 
-                std::cout << "########################################################" << std::endl;
-                */
+                std::cout << "########################################################" << std::endl;            
             }
         }
 
