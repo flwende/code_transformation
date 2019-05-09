@@ -46,7 +46,7 @@ namespace fw
         public:
             T w;
 
-            double len(const std::size_t idx, const B c = 2.0)
+            const double len(const std::size_t idx, const B c = 2.0)
             {
                 return 0.0;
             }

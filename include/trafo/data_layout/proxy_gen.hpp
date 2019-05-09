@@ -577,6 +577,127 @@ namespace TRAFO_NAMESPACE
             return (methodString + std::string("\n"));
         }
 */
+        void modifyMethodSignature(const ClassMetaData::Definition& definition, const ClassMetaData::Function& method, Rewriter& rewriter, const std::string proxyNamespace, const std::string targetNamespace, const bool returnProxyType = false)
+        {
+            clang::ASTContext& context = definition.declaration.getASTContext();
+            const clang::SourceManager& sourceManager = definition.declaration.getSourceManager();
+            const clang::FileID fileId = definition.declaration.fileId;
+            const Indentation insideClassIndent = definition.declaration.indent + 1;
+            const std::string indent(insideClassIndent.value, ' ');
+            const std::string extIndent((insideClassIndent + 1).value, ' ');
+            //const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
+            const std::string proxyTypeName = proxyNamespace + method.className + std::string("_proxy");
+            const std::string targetTypeName = targetNamespace + method.className;
+
+            if (method.isMacroExpansion)
+            {
+                std::string macroString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);                            
+                std::string proxyMacroString = macroString;
+                if (findAndReplace(macroString, method.className, targetTypeName, true, true))
+                {
+                    rewriter.replace(getExpansionSourceRange(method.sourceRange, context), macroString);
+                }
+                if (findAndReplace(proxyMacroString, method.className, proxyTypeName, true, true))
+                {
+                    rewriter.insert(getNextLine(getExpansionSourceLocation(method.sourceRange.getEnd(), context), context), indent + proxyMacroString + std::string("\n"));
+                }
+                
+            }
+            else
+            {
+                // duplicate the original function definition and insert it only if we have to change argument types in the orignal definition
+                // NOTE 1: this must not be the case if the class-type arguments have default values!
+                const std::string originalFunctionDefinition = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);
+                bool insertOriginalDefinition = false;
+
+                // create new function
+                std::stringstream functionSignature;
+                bool insertNewDefinition = false;
+
+                if (method.returnsClassType && returnProxyType)
+                {
+                    std::string tmp = method.signatureString[0];
+                    findAndReplace(tmp, method.className, proxyTypeName, true, true);
+                    functionSignature << tmp << "(";
+                }
+                else
+                {
+                    functionSignature << method.signatureString[0] << "(";
+                }
+
+                for (std::uint32_t i = 0; i < method.arguments.size(); ++i)
+                {
+                    const auto& argument = method.arguments[i];
+
+                    if (argument.isClassType)
+                    {
+                        std::string targetArgumentTypeName = argument.elementTypeName;
+                        std::string proxyArgumentTypeName = targetArgumentTypeName;
+                        findAndReplace(targetArgumentTypeName, method.className, targetTypeName, true, true);
+                        findAndReplace(proxyArgumentTypeName, method.className, proxyTypeName, true, true);
+                        
+                        std::string argumentStringPostfix = (method.isFunctionTemplate ? argument.templateParameters : std::string("")) +
+                            std::string(argument.isRReference ? "&&" : "") + 
+                            std::string(argument.isLReference ? "&" : "") + 
+                            std::string(argument.isPointer ? "* " : " ") + 
+                            argument.name;
+                        std::string targetArgumentString = (argument.isConst ? "const " : "") + targetArgumentTypeName + argumentStringPostfix;
+                        std::string proxyArgumentString = (argument.isConst ? "const " : "") + proxyArgumentTypeName + argumentStringPostfix;
+
+                        if (argument.decl.hasDefaultArg())
+                        {
+                            std::string originalArgumentString = dumpSourceRangeToString(method.signature[i + 1], sourceManager);
+
+                            rewriter.replace(argument.sourceRange, targetArgumentString + std::string(" ") + originalArgumentString.substr(originalArgumentString.rfind('=')));
+                            insertNewDefinition = true;
+                        }
+                        else
+                        {
+                            // 1. replace argument by proxy argument in original function
+                            rewriter.replace(argument.sourceRange, proxyArgumentString);
+                            insertOriginalDefinition = true;
+                        }
+
+                        // 2. create proxy argument in new function
+                        functionSignature << (i > 0 ? ", " : "") << proxyArgumentString;
+                    }
+                    else
+                    {
+                        functionSignature << (i > 0 ? ", " : "") << dumpSourceRangeToString(method.signature[i + 1], sourceManager);
+                    }
+
+                    if ((i + 1) ==  method.arguments.size())
+                    {
+                        functionSignature << (method.isConst ? ") const\n" : ")\n");
+                    }
+                }
+                
+                if (insertNewDefinition)
+                {
+                    rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), std::string("\n") + indent + functionSignature.str());
+                    rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + dumpSourceRangeToString(method.extendedBodySourceRange, sourceManager));
+                }
+
+                if (insertOriginalDefinition)
+                {
+                    if (returnProxyType)
+                    {
+                        if (method.returnsClassTypeReference)
+                        {
+                            std::string tmp = dumpSourceRangeToString(method.signatureSourceRange, sourceManager);
+                            findAndReplace(tmp, method.className, proxyTypeName, false, true);
+                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), std::string("\n") + indent + tmp);
+                            rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), dumpSourceRangeToString(method.extendedBodySourceRange, sourceManager));
+                        }
+                    }
+                    else
+                    {
+                        rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), std::string("\n") + indent + originalFunctionDefinition);
+                    }
+                }
+            }
+        }
+
 
         void modifyOriginalSourceCode(const std::unique_ptr<ClassMetaData>& candidate, Rewriter& rewriter)
         {
@@ -631,85 +752,7 @@ namespace TRAFO_NAMESPACE
                 {
                     if (method.hasClassTypeArguments)
                     { 
-                        const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
-
-                        if (method.isMacroExpansion)
-                        {
-                            std::string macroString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);                            
-                            if (findAndReplace(macroString, method.className, proxyTypeName, true, true))
-                            {
-                                rewriter.insert(getNextLine(getExpansionSourceLocation(method.sourceRange.getEnd(), context), context), indent + macroString + std::string("\n"));
-                            }
-                        }
-                        else
-                        {
-                            // duplicate the original function definition and insert it only if we have to change argument types in the orignal definition
-                            // NOTE 1: this must not be the case if the class-type arguments have default values!
-                            const std::string originalFunctionDefinition = dumpSourceRangeToString(method.extendedSourceRange, sourceManager);
-                            bool insertOriginalDefinition = false;
-
-                            // create new function
-                            std::stringstream functionSignature;
-                            bool insertNewDefinition = false;
-
-                            functionSignature << method.signatureString[0] << "(";
-
-                            for (std::uint32_t i = 0; i < method.arguments.size(); ++i)
-                            {
-                                const auto& argument = method.arguments[i];
-
-                                if (argument.isClassType)
-                                {
-                                    std::string argumentTypeName = argument.elementTypeName;
-                                    findAndReplace(argumentTypeName, method.className, proxyTypeName, true, true);
-
-                                    const std::string argumentString = (argument.isConst ? "const " : "") + argumentTypeName + 
-                                        (method.isFunctionTemplate ? argument.templateParameters : std::string("")) +
-                                        std::string(argument.isRReference ? "&&" : "") + 
-                                        std::string(argument.isLReference ? "&" : "") + 
-                                        std::string(argument.isPointer ? "* " : " ") + 
-                                        argument.name;
-
-                                    if (argument.decl.hasDefaultArg())
-                                    {
-                                        // 1. let it as is in original function
-
-                                        // 2. create proxy argument in new function
-                                        functionSignature << (i > 0 ? ", " : "") << argumentString;
-                                        insertNewDefinition = true;
-                                    }
-                                    else
-                                    {
-                                        // 1. replace it by proxy argument in original function
-                                        rewriter.replace(argument.sourceRange, argumentString);
-                                        insertOriginalDefinition = true;
-
-                                        // 2. create proxy argument in new function
-                                        functionSignature << (i > 0 ? ", " : "") << argumentString;
-                                    }
-                                }
-                                else
-                                {
-                                    functionSignature << (i > 0 ? ", " : "") << dumpSourceRangeToString(method.signature[i + 1], sourceManager);
-                                }
-
-                                if ((i + 1) ==  method.arguments.size())
-                                {
-                                    functionSignature << (method.isConst ? ") const\n" : ")\n");
-                                }
-                            }
-                            
-                            if (insertNewDefinition)
-                            {
-                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + functionSignature.str());
-                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + dumpSourceRangeToString(method.extendedBodySourceRange, sourceManager));
-                            }
-
-                            if (insertOriginalDefinition)
-                            {
-                                rewriter.insert(getNextLine(method.sourceRange.getEnd(), context), indent + originalFunctionDefinition);
-                            }
-                        }
+                        modifyMethodSignature(definition, method, rewriter, proxyNamespace + std::string("::"), std::string(""));
                     }
                 }
             }
@@ -720,54 +763,63 @@ namespace TRAFO_NAMESPACE
             rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), includeLine.str());
         }
 
-        std::string generateProxyClassConstructor(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        std::string generateProxyClassConstructor(const ClassMetaData::Definition& definition)
         {
             std::stringstream constructor;
-            constructor << indent << definition.name << "_proxy(";
-            constructor << definition.fields[0].typeName << "* ptr, const std::size_t n";
-            if (definition.fields.size() > definition.indexPublicFields.size())
+            const Indentation Indent = definition.declaration.indent + 1;
+            const std::string indent(Indent.value, ' ');
+            const Indentation ExtIndent = definition.declaration.indent + 2;
+            const std::string extIndent(ExtIndent.value, ' ');
+
+            constructor << definition.name << "_proxy(base_pointer base)\n" << extIndent << ":\n";
+
+            if (definition.isHomogeneous)
             {
+                std::uint32_t fieldId = 0;
                 for (const auto& field : definition.fields)
                 {
-                    if (!field.isPublic)
-                    {
-                        constructor <<  ", " << field.typeName << " " << field.name;
-                    }
+                    constructor << extIndent << field.name << "(base.ptr[" << fieldId << " * base.n_0])" << ((fieldId + 1) < definition.fields.size() ? ",\n" : "\n");
+                    ++fieldId;
                 }
             }
-            constructor << ")\n";
-            constructor << indent << ":\n";
-
-            const std::uint32_t numFields = definition.fields.size();
-            std::uint32_t publicFieldId = 0;
-            std::uint32_t fieldId = 0;
-            for (const auto& field : definition.fields)
+            else
             {
-                if (field.isPublic)
+                std::uint32_t fieldId = 0;
+                for (const auto& field : definition.fields)
                 {
-                    constructor << indent << field.name << "(ptr[" << std::to_string(publicFieldId) <<" * n]";
-                    ++publicFieldId;
+                    constructor << extIndent << field.name << "(*(std::get<" << fieldId << ">(base.ptr)))" << ((fieldId + 1) < definition.fields.size() ? ",\n" : "\n");
+                    ++fieldId;
                 }
-                else
-                {
-                    constructor << indent << field.name << "(" << field.name;
-                }
-
-                constructor << ((fieldId + 1) == numFields ? ")," : ")") << "\n";
-                ++fieldId;
             }
-            constructor << indent << "{ ; }";
+            constructor << indent << "{}\n";
             
             return constructor.str();
         }
 
-        std::string generateProxyClassCopyConstructor(const ClassMetaData::Definition& definition, const std::string indent = std::string(""))
+        std::string generateProxyClassTupleConstructor(const ClassMetaData::Definition& definition)
         {
             std::stringstream constructor;
+            const Indentation Indent = definition.declaration.indent + 1;
+            const std::string indent(Indent.value, ' ');
+            const Indentation ExtIndent = definition.declaration.indent + 2;
+            const std::string extIndent(ExtIndent.value, ' ');
 
-            constructor << indent << definition.name << "_proxy(" << definition.name << "& rhs)\n";
-            constructor << indent << generateConstructorInitializerList(definition, std::string("rhs"), Indentation(0, 0)) << "\n";
-            constructor << indent << "{ ; }";
+            constructor << definition.name << "_proxy(" << "std::tuple<";
+
+            std::uint32_t fieldId = 0;
+            for (const auto& field : definition.fields)
+            {
+                constructor << (fieldId == 0 ? "" : ", ") << field.elementTypeName << "&";
+                ++fieldId;
+            }
+            constructor << "> obj)\n" << extIndent << ":\n";
+            fieldId = 0;
+            for (const auto& field : definition.fields)
+            {
+                constructor << extIndent << field.name << "(std::get<" << fieldId << ">(obj))" << ((fieldId + 1) < definition.fields.size() ? ",\n" : "\n");
+                ++fieldId;
+            }
+            constructor << indent << "{}\n";
 
             return constructor.str();
         }
@@ -894,46 +946,57 @@ namespace TRAFO_NAMESPACE
                 rewriter.insert(definition.innerLocBegin, basePointerStream.str());
 
                 // insert meta data: is const type?
-                std::stringstream isConstTypeStream;
-                isConstTypeStream << "\n" << extIndent << "static constexpr bool is_const_type = (";
-                std::uint32_t templateParameterId = 0;
-                for (const auto& templateParamter : definition.declaration.templateParameters)
+                if (definition.declaration.templateParameters.size() > 0)
                 {
-                    if (!templateParamter.isTypeParameter) continue;
+                    std::stringstream isConstTypeStream;
+                    isConstTypeStream << "\n" << extIndent << "static constexpr bool is_const_type = (";
+                    std::uint32_t templateParameterId = 0;
+                    for (const auto& templateParamter : definition.declaration.templateParameters)
+                    {
+                        if (!templateParamter.isTypeParameter) continue;
 
-                    const std::string parameterName = templateParamter.name;
+                        const std::string parameterName = templateParamter.name;
 
-                    isConstTypeStream << (templateParameterId == 0 ? "" : " || " ) << "std::is_const<" << parameterName << ">::value";
-                    ++templateParameterId;
+                        isConstTypeStream << (templateParameterId == 0 ? "" : " || " ) << "std::is_const<" << parameterName << ">::value";
+                        ++templateParameterId;
+                    }
+                    isConstTypeStream << ");\n";
+                    rewriter.insert(definition.innerLocBegin, isConstTypeStream.str());
                 }
-                isConstTypeStream << ");\n";
-                rewriter.insert(definition.innerLocBegin, isConstTypeStream.str());
 
                 // insert meta data: original type
                 std::stringstream originalTypeStream;
-                originalTypeStream << "\n" << extIndent << "using original_type = typename std::conditional<is_const_type,\n" << extExtIndent << "const " << definition.name << "<";
-                templateParameterId = 0;
-                for (const auto& templateParamter : definition.declaration.templateParameters)
+                if (definition.declaration.templateParameters.size() > 0)
                 {
-                    if (!templateParamter.isTypeParameter) continue;
+                    originalTypeStream << "\n" << extIndent << "using original_type = typename std::conditional<is_const_type,\n" << extExtIndent << "const " << definition.name << "<";
+                    std::uint32_t templateParameterId = 0;
+                    for (const auto& templateParamter : definition.declaration.templateParameters)
+                    {
+                        if (!templateParamter.isTypeParameter) continue;
 
-                    const std::string parameterName = templateParamter.name;
+                        const std::string parameterName = templateParamter.name;
 
-                    originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
-                    ++templateParameterId;
+                        originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
+                        ++templateParameterId;
+                    }
+                    originalTypeStream << ">,\n" << extExtIndent << definition.name << "<";
+                    templateParameterId = 0;
+                    for (const auto& templateParamter : definition.declaration.templateParameters)
+                    {
+                        if (!templateParamter.isTypeParameter) continue;
+
+                        const std::string parameterName = templateParamter.name;
+
+                        originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
+                        ++templateParameterId;
+                    }
+                    originalTypeStream << ">>::type;\n";
                 }
-                originalTypeStream << ">,\n" << extExtIndent << definition.name << "<";
-                templateParameterId = 0;
-                for (const auto& templateParamter : definition.declaration.templateParameters)
+                else
                 {
-                    if (!templateParamter.isTypeParameter) continue;
-
-                    const std::string parameterName = templateParamter.name;
-
-                    originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
-                    ++templateParameterId;
+                    originalTypeStream << "\n" << extIndent << "using original_type = " << definition.name << ";\n";
                 }
-                originalTypeStream << ">>::type;\n";
+                
                 rewriter.insert(definition.innerLocBegin, originalTypeStream.str());
 
                 if (!definition.declaration.isClass)
@@ -941,50 +1004,10 @@ namespace TRAFO_NAMESPACE
                     rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("public:\n\n"));
                 }
 
-                continue;
-
-                // insert using stmt
-                std::stringstream usingStmt;
-                if (definition.isTemplatePartialSpecialization)
-                {
-                    for (const auto& templateArgument : definition.templatePartialSpecializationArguments)
-                    {
-                        const std::string templateArgumentName = templateArgument.first;
-                        const bool isTypeParameter = templateArgument.second;
-                        if (isTypeParameter)
-                        {
-                            usingStmt << "using nonconst_" << templateArgumentName << " = typename std::remove_const<" << templateArgumentName << ">::type;\n\t";
-                        }
-                    }
-                }
-                else
-                {
-                    for (const auto& templateParameter : definition.declaration.templateParameters)
-                    {
-                        const std::string templateArgumentName = templateParameter.name;
-                        const bool isTemplateTypeParmType = templateParameter.isTypeParameter;
-                        if (isTemplateTypeParmType)
-                        {
-                            usingStmt << "using nonconst_" << templateArgumentName << " = typename std::remove_const<" << templateArgumentName << ">::type;\n\t";
-                        }
-                    }
-                }
-                usingStmt << "using " << definition.name << " = " << definition.declaration.namespaceString << definition.name;
-                if (definition.isTemplatePartialSpecialization)
-                {
-                    usingStmt << "<" << concat(definition.getTemplatePartialSpecializationArgumentNames("nonconst_"), std::string(", ")) << ">";
-                }
-                else if (definition.declaration.templateParameters.size() > 0)
-                {
-                    usingStmt << "<" << concat(definition.declaration.getTemplateParameterNames("nonconst_"), std::string(", ")) << ">";
-                }
-                usingStmt << ";";
-                rewriter.insert(definition.innerLocBegin, std::string("\n\t") + usingStmt.str(), true, true);
-               
-                // standard constructor
+                // constructors
                 std::vector<std::string> proxyClassConstructors;
-                proxyClassConstructors.emplace_back(generateProxyClassConstructor(definition, std::string("\t")));
-                proxyClassConstructors.emplace_back(generateProxyClassCopyConstructor(definition, std::string("\t")));
+                proxyClassConstructors.emplace_back(generateProxyClassConstructor(definition));
+                proxyClassConstructors.emplace_back(generateProxyClassTupleConstructor(definition));
 
                 const std::uint32_t numConstructorsToBeInserted = proxyClassConstructors.size();
                 const std::uint32_t numConstructorLocationsAvailable = definition.indexPublicConstructors.size();
@@ -997,6 +1020,39 @@ namespace TRAFO_NAMESPACE
                 for (std::uint32_t i = numConstructorsInserted; i < proxyClassConstructors.size(); ++i)
                 {
                     rewriter.insert(fallbackSourceLocation, std::string("\n") + proxyClassConstructors[i]);
+                }
+
+                for (std::uint32_t i = numConstructorsInserted; i < definition.constructors.size(); ++i)
+                {
+                    rewriter.remove(definition.constructors[i].sourceRange);
+                }
+
+                // adapt functions
+                for (const auto& method : definition.cxxMethods)
+                {
+                    if (!method.hasClassTypeArguments && !method.returnsClassType) continue;
+
+                    if (method.returnsClassType)
+                    {
+                        rewriter.replace(method.returnTypeSourceRange, definition.name + std::string("_proxy"));
+                    }
+
+                    if (method.hasClassTypeArguments)
+                    {
+                        std::string targetNamespace;
+                        for (const auto& thisNamespace : definition.declaration.namespaces)
+                        {
+                            targetNamespace += (thisNamespace.name + std::string("::"));
+                        }
+
+                        modifyMethodSignature(definition, method, rewriter, std::string(""), targetNamespace, true);
+                    }
+                }
+
+                // change field types -> reference values
+                for (const auto& field : definition.fields)
+                {
+                    rewriter.replace(field.sourceRange, field.typeName + std::string("& ") + field.name);
                 }
             }
         }
@@ -1012,7 +1068,7 @@ namespace TRAFO_NAMESPACE
 
                 std::cout << "########################################################" << std::endl;
 
-                //target->printInfo();
+                target->printInfo();
                 
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);

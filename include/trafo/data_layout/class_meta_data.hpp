@@ -93,6 +93,7 @@ namespace TRAFO_NAMESPACE
 
             class FunctionArgument
             {
+                friend class Function;
                 friend class Constructor;
                 friend class Field;
 
@@ -110,9 +111,10 @@ namespace TRAFO_NAMESPACE
                     return (qualType.getAsString().find("const", 0, 5) != std::string::npos);
                 }
 
-                static std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr, const bool getElementTypeName = false)
+                //static std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr, const bool getElementTypeName = false)
+                static std::string getTypeName(const clang::QualType& qualType, const Definition* definition = nullptr, const bool getElementTypeName = false)
                 {
-                    const clang::QualType qualType = decl.getType();
+                    //const clang::QualType qualType = decl.getType();
                     std::string typeName = (getElementTypeName ? qualType.getUnqualifiedType().getNonReferenceType().getAsString() : qualType.getAsString());
                     
                     if (getElementTypeName)
@@ -162,14 +164,16 @@ namespace TRAFO_NAMESPACE
                 const bool isLReference;
                 const bool isRReference;
                 const bool isPointer;
-
+                
                 FunctionArgument(const clang::ParmVarDecl& decl, const Definition* definition = nullptr)
                     :
                     decl(decl),
                     sourceRange(getSpellingSourceRange(decl.getSourceRange(), decl.getASTContext())),
                     name(decl.getNameAsString()),
-                    typeName(getTypeName(decl, definition)),
-                    elementTypeName(getTypeName(decl, definition, true)),
+                    //typeName(getTypeName(decl, definition)),
+                    //elementTypeName(getTypeName(decl, definition, true)),
+                    typeName(getTypeName(decl.getType(), definition)),
+                    elementTypeName(getTypeName(decl.getType(), definition, true)),
                     templateParameters(getTemplateParameters(decl, definition)),
                     isConst(isConstQualified(decl)),
                     isClassType(definition ? (typeName.find(definition->name) != std::string::npos) : false),
@@ -196,7 +200,7 @@ namespace TRAFO_NAMESPACE
                     std::cout << ", element type=" << elementTypeName << std::endl;
                     if (templateParameters.length())
                     {
-                        std::cout << indent << "template parameters=" << templateParameters << std::endl;
+                        std::cout << indent << "\t+-> template parameters=" << templateParameters << std::endl;
                     }
                     std::cout << indent << "\t+-> range: " << sourceRange.printToString(sourceManager) << std::endl;
                 }
@@ -350,9 +354,11 @@ namespace TRAFO_NAMESPACE
                 const clang::SourceRange signatureSourceRange;
                 const std::vector<std::string> signatureString;
                 const clang::QualType returnType;
-                const clang::SourceRange returnTypeSourceRange;
                 const std::string returnTypeName;
+                const std::string elementReturnTypeName;
+                const clang::SourceRange returnTypeSourceRange;
                 const bool returnsClassType;
+                const bool returnsClassTypeReference;
 
                 Function(const clang::CXXMethodDecl& decl, const Definition* definition = nullptr)
                     :
@@ -381,13 +387,15 @@ namespace TRAFO_NAMESPACE
                             return (red | (argument.isClassType && argument.decl.hasDefaultArg()));
                         })),
                     signature(getSignature()),
-                    //signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature.front().getBegin() , signature.back().getEnd()) : clang::SourceRange()),
                     signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature[0].getBegin() , signature[signature.size() - 1].getEnd()) : clang::SourceRange()),
                     signatureString(getSignatureString()),
                     returnType(decl.getReturnType()),
-                    returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
-                    returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
-                    returnsClassType(decl.isNoReturn() ? false : (returnTypeName == className))
+                    returnTypeName(decl.isNoReturn() ? std::string("") : FunctionArgument::getTypeName(decl.getReturnType(), definition)),
+                    elementReturnTypeName(decl.isNoReturn() ? std::string("") : FunctionArgument::getTypeName(decl.getReturnType(), definition, true)),
+                    returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : clang::SourceRange(decl.getReturnTypeSourceRange().getBegin(),
+                        decl.getReturnTypeSourceRange().getBegin().getLocWithOffset(elementReturnTypeName.length() - 1))),
+                    returnsClassType(decl.isNoReturn() ? false : (elementReturnTypeName == className)),
+                    returnsClassTypeReference(returnsClassType ? (decl.getReturnType()->isReferenceType() || decl.getReturnType()->isPointerType()) : false)
                 { ; }
 
                 Function(const clang::FunctionDecl& decl, const std::string className = std::string(""), const Definition* definition = nullptr, const bool isFunctionTemplateDecl = false)
@@ -417,13 +425,15 @@ namespace TRAFO_NAMESPACE
                             return (red | (argument.isClassType && argument.decl.hasDefaultArg()));
                         })),
                     signature(getSignature()),
-                    //signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature.front().getBegin() , signature.back().getEnd()) : clang::SourceRange()),
                     signatureSourceRange(signature.size() > 0 ? clang::SourceRange(signature[0].getBegin() , signature[signature.size() - 1].getEnd()) : clang::SourceRange()),
                     signatureString(getSignatureString()),
                     returnType(decl.getReturnType()),
-                    returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : decl.getReturnTypeSourceRange()),
-                    returnTypeName(decl.isNoReturn() ? std::string("") : dumpSourceRangeToString(returnTypeSourceRange, decl.getASTContext().getSourceManager())),
-                    returnsClassType(decl.isNoReturn() ? false : (returnTypeName == className))
+                    returnTypeName(decl.isNoReturn() ? std::string("") : FunctionArgument::getTypeName(decl.getReturnType(), definition)),
+                    elementReturnTypeName(decl.isNoReturn() ? std::string("") : FunctionArgument::getTypeName(decl.getReturnType(), definition, true)),
+                    returnTypeSourceRange(decl.isNoReturn() ? clang::SourceRange() : clang::SourceRange(decl.getReturnTypeSourceRange().getBegin(),
+                        decl.getReturnTypeSourceRange().getBegin().getLocWithOffset(elementReturnTypeName.length() - 1))),
+                    returnsClassType(decl.isNoReturn() ? false : (elementReturnTypeName == className)),
+                    returnsClassTypeReference(returnsClassType ? (decl.getReturnType()->isReferenceType() || decl.getReturnType()->isPointerType()) : false)
                 { ; }
 
                 void printInfo(const clang::SourceManager& sourceManager, const std::string indent = std::string("")) const
@@ -442,7 +452,13 @@ namespace TRAFO_NAMESPACE
                         std::cout << indent << "\t+-> body range: " << bodySourceRange.printToString(sourceManager) << std::endl;
                     }
 
-                    std::cout << indent << "\t+-> returns class type: " << (returnsClassType ? "yes" : "no") << std::endl;
+                    std::cout << indent << "\t+-> return type: " << returnTypeName << " (" << elementReturnTypeName << ")" << std::endl;
+                    std::cout << indent << "\t\t* returns class type: " << (returnsClassType ? "yes" : "no");
+                    if (returnsClassTypeReference)
+                    {
+                        std::cout << " (reference/pointer)";
+                    }
+                    std::cout << std::endl;
                     std::cout << indent << "\t\t* source range: " << returnTypeSourceRange.printToString(sourceManager) << std::endl;
                     
                     if (arguments.size())
@@ -465,7 +481,8 @@ namespace TRAFO_NAMESPACE
 
                     if (const clang::ParmVarDecl* parameter = decl.getParamDecl(0))
                     {
-                        const std::string typeName = FunctionArgument::getTypeName(*decl.getParamDecl(0), definition, true);
+                        //const std::string typeName = FunctionArgument::getTypeName(*decl.getParamDecl(0), definition, true);
+                        const std::string typeName = FunctionArgument::getTypeName(decl.getParamDecl(0)->getType(), definition, true);
 
                         return (typeName.find(definition->name) != std::string::npos);
                     }

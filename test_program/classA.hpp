@@ -76,11 +76,12 @@ namespace MY_NAMESPACE
 
         #define MACRO(OP, IN_T)                                 \
         template <typename X>                                   \
-        inline void operator OP (const IN_T<X, 3, TT> & rhs)    \
+        inline A& operator OP (const IN_T<X, 3, TT> & rhs)      \
         {                                                       \
             x OP rhs.x;                                         \
             y OP rhs.y;                                         \
             z OP rhs.z;                                         \
+            return *this;                                       \
         }
         MACRO(+=, A)
         MACRO(-=, A)
