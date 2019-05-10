@@ -602,6 +602,17 @@ namespace TRAFO_NAMESPACE
                     rewriter.insert(getNextLine(getExpansionSourceLocation(method.sourceRange.getEnd(), context), context), indent + proxyMacroString + std::string("\n"));
                 }
                 
+                // adapt return type
+                if (returnProxyType && method.returnsClassTypeReference)
+                {
+                    const clang::SourceLocation beginLoc = getSpellingSourceLocation(method.returnTypeSourceRange.getBegin(), context);
+                    //const clang::SourceLocation endLoc = method.macroDefinitionSourceRange.getEnd();
+                    const clang::SourceLocation endLoc = getSpellingSourceLocation(method.bodySourceRange.getBegin(), context).getLocWithOffset(-1);
+                    std::string selection = dumpSourceRangeToString({beginLoc, endLoc}, sourceManager);
+                    findAndReplace(selection, method.className, proxyTypeName, true, true);
+
+                    rewriter.replace({beginLoc, endLoc}, selection);
+                }
             }
             else
             {
