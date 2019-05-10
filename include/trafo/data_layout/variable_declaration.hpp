@@ -41,6 +41,7 @@ namespace TRAFO_NAMESPACE
             const clang::SourceRange sourceRange;
             const clang::QualType elementDataType;
             const std::string elementDataTypeName;
+            std::string elementDataTypeNamespace;
 
             Declaration(const clang::VarDecl& decl, const clang::QualType elementDataType)
                 :
@@ -48,7 +49,20 @@ namespace TRAFO_NAMESPACE
                 sourceRange(decl.getSourceRange()),
                 elementDataType(elementDataType),
                 elementDataTypeName(getDataTypeName(elementDataType))
-            { ; }
+            {
+                if (!elementDataType.isNull())
+                {
+                    const std::string fullElementTypeName = elementDataType->getCanonicalTypeInternal().getAsString();
+                    const std::size_t startPosElementTypeName = fullElementTypeName.find(elementDataTypeName);
+                    const std::size_t startPosElementTypeNamespace = fullElementTypeName.rfind(' ', startPosElementTypeName) + 1;
+
+                    elementDataTypeNamespace = fullElementTypeName.substr(startPosElementTypeNamespace, (startPosElementTypeName - startPosElementTypeNamespace));
+                }
+                else
+                {
+                    elementDataTypeNamespace = std::string("");
+                }
+            }
 
         public:
 
@@ -61,7 +75,7 @@ namespace TRAFO_NAMESPACE
                 std::cout << indent << "* element data type: " << elementDataType.getAsString();
                 if (elementDataType.getAsString() != elementDataTypeName)
                 {
-                    std::cout << " (" << elementDataTypeName << ")";
+                    std::cout << " (" <<  elementDataTypeNamespace << elementDataTypeName << ")";
                 }
                 std::cout << std::endl;
             }
@@ -77,6 +91,7 @@ namespace TRAFO_NAMESPACE
             using Base::sourceRange;
             using Base::elementDataType;
             using Base::elementDataTypeName;
+            using Base::elementDataTypeNamespace;
 
             const clang::QualType arrayType;
             const bool isNested;
@@ -169,6 +184,7 @@ namespace TRAFO_NAMESPACE
             using Base::sourceRange;
             using Base::elementDataType;
             using Base::elementDataTypeName;
+            using Base::elementDataTypeNamespace;
 
             const clang::QualType containerType;
             const bool isNested;

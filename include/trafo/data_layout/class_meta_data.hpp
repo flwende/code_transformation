@@ -715,6 +715,11 @@ namespace TRAFO_NAMESPACE
                         {
                             if (const clang::NamespaceDecl* const decl = result.Nodes.getNodeAs<clang::NamespaceDecl>("namespaceDecl"))
                             {
+                                const std::string sourceLocationString = decl->getBeginLoc().printToString(decl->getASTContext().getSourceManager());
+                            
+                                if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                    sourceLocationString.find("usr/include") != std::string::npos) return;
+
                                 namespaces.emplace_back(*decl);
                             }
                         });
@@ -1236,7 +1241,8 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates(false),
                 topMostSourceLocation(sourceManager.getLocForEndOfFile(fileId)),
                 bottomMostSourceLocation(sourceManager.getLocForStartOfFile(fileId)),
-                filename(sourceManager.getFilename(topMostSourceLocation).str())
+                //filename(sourceManager.getFilename(topMostSourceLocation).str())
+                filename(sourceManager.getFilename(decl.getLocation()).str())
             { ; }
 
         public:

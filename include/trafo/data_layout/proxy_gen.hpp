@@ -381,24 +381,34 @@ namespace TRAFO_NAMESPACE
             {
                 // template class declarations
                 matcher.addMatcher(classTemplateDecl(hasName(name)).bind("classTemplateDeclaration"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                    [this, &context] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::ClassTemplateDecl* const decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDeclaration"))
                         {
                             if (decl->isThisDeclarationADefinition()) return;
 
+                            const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
+                            
+                            if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                sourceLocationString.find("usr/include") != std::string::npos) return;
+                          
                             proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, false));
                         }
                     });
                 
                 // template class definitions
                 matcher.addMatcher(classTemplateDecl(hasName(name)).bind("classTemplateDefinition"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                    [this, &context] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::ClassTemplateDecl* const decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDefinition"))
                         {
                             if (!decl->isThisDeclarationADefinition()) return;
 
+                            const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
+                            
+                            if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                sourceLocationString.find("usr/include") != std::string::npos) return;
+                            
                             for (auto& target : proxyClassTargets)
                             {
                                 if (target->addDefinition(*(decl->getTemplatedDecl()))) return;
@@ -412,12 +422,17 @@ namespace TRAFO_NAMESPACE
                 
                 // template class partial specialization
                 matcher.addMatcher(classTemplatePartialSpecializationDecl(hasName(name)).bind("classTemplatePartialSpecialization"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                    [this, &context] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::ClassTemplatePartialSpecializationDecl* const decl = result.Nodes.getNodeAs<clang::ClassTemplatePartialSpecializationDecl>("classTemplatePartialSpecialization"))
                         {
                             if (!isThisClassInstantiated(decl)) return;
                             
+                            const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
+                            
+                            if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                sourceLocationString.find("usr/include") != std::string::npos) return;
+
                             for (std::size_t i = 0; i < proxyClassTargets.size(); ++i)
                             {
                                 if (proxyClassTargets[i]->addDefinition(*decl, true)) return;
@@ -427,12 +442,17 @@ namespace TRAFO_NAMESPACE
                     
                 // standard C++ classes
                 matcher.addMatcher(cxxRecordDecl(allOf(hasName(name), unless(isTemplateInstantiation()))).bind("c++Class"),
-                    [this] (const MatchFinder::MatchResult& result) mutable
+                    [this, &context] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::CXXRecordDecl* const decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("c++Class"))
                         {
                             const std::string name = decl->getNameAsString();
                             const bool isDefinition = decl->isThisDeclarationADefinition();
+
+                            const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
+                            
+                            if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                sourceLocationString.find("usr/include") != std::string::npos) return;
 
                             for (auto& target : proxyClassTargets)
                             {
@@ -487,6 +507,7 @@ namespace TRAFO_NAMESPACE
             const std::string indent(insideClassIndent.value, ' ');
             std::stringstream usingStmt;
 
+            usingStmt << indent << "using type = " << definition.name << definition.templateParameterString << ";\n\n";
             usingStmt << indent << "using proxy_type = typename " << definition.declaration.namespaceString << proxyNamespace << "::" << definition.name << "_proxy";
             usingStmt << definition.templateParameterString << ";\n";
 
@@ -718,7 +739,41 @@ namespace TRAFO_NAMESPACE
             clang::ASTContext& context = declaration.getASTContext();
             const clang::SourceManager& sourceManager = declaration.getSourceManager();
             const clang::FileID fileId = declaration.fileId;
+/*
+            // insert iterator class forward declaration (top level namespace) and include lines
+            {
+                const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
+                const clang::SourceLocation insertLocation = (declaration.namespaces.size() > 0 ? declaration.namespaces[0].sourceRange.getBegin() : declaration.sourceRange.getBegin());
+                
+                rewriter.insert(insertLocation, std::string("#include <common/memory.hpp>\n"));
+                rewriter.insert(insertLocation, std::string("#include <common/data_layout.hpp>\n\n"));
+                
+                const Indentation Indent = Indentation(declaration.indent.increment, declaration.indent.increment);
+                const std::string indent(Indent.value, ' ');
+                const Indentation ExtIndent = Indent + 1;
+                const std::string extIndent(ExtIndent.value, ' ');
 
+                std::stringstream iteratorForwardDeclStream;
+                iteratorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
+                iteratorForwardDeclStream << indent << "namespace " << proxyNamespace << "\n";
+                iteratorForwardDeclStream << indent << "{\n";
+                iteratorForwardDeclStream << extIndent << "template <typename P, typename R>\n";
+                iteratorForwardDeclStream << extIndent << "class XXX_NAMESPACE::internal::iterator;\n";
+                iteratorForwardDeclStream << indent << "}\n";
+                iteratorForwardDeclStream << "}\n\n";
+                rewriter.insert(insertLocation, iteratorForwardDeclStream.str());
+
+                std::stringstream accessorForwardDeclStream;
+                accessorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
+                accessorForwardDeclStream << indent << "namespace " << proxyNamespace << "\n";
+                accessorForwardDeclStream << indent << "{\n";
+                accessorForwardDeclStream << extIndent << "template <typename X, std::size_t N, std::size_t D, XXX_NAMESPACE::data_layout L>\n";
+                iteratorForwardDeclStream << extIndent << "class XXX_NAMESPACE::internal::accessor;\n";
+                accessorForwardDeclStream << indent << "}\n";
+                accessorForwardDeclStream << "}\n\n";
+                rewriter.insert(insertLocation, accessorForwardDeclStream.str());
+            }
+*/
             // insert proxy class forward declaration
             rewriter.insert(getBeginOfLine(declaration.sourceRange.getBegin(), context), generateProxyClassDeclaration(declaration));
             
@@ -770,8 +825,56 @@ namespace TRAFO_NAMESPACE
             
             // insert include line outside the outermost namespace or after the last class definition if there is no namespace
             std::stringstream includeLine;
-            includeLine << "\n#include \"autogen_" << candidate->name << "_proxy.hpp\"\n";
+            includeLine << "\n#include \"autogen_" << candidate->name << "_proxy.hpp\"\n\n";
             rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), includeLine.str());
+
+            // insert type traits
+            {
+                const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
+                
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), std::string("#include <common/traits.hpp>\n\n"));    
+                
+                const Indentation Indent = Indentation(declaration.indent.increment, declaration.indent.increment);
+                const std::string indent(Indent.value, ' ');
+                const Indentation ExtIndent = Indent + 1;
+                const std::string extIndent(ExtIndent.value, ' ');
+                const Indentation ExtExtIndent = ExtIndent + 1;
+                const std::string extExtIndent(ExtExtIndent.value, ' ');
+                std::string namespaceName;
+                for (const auto& thisNamespace : declaration.namespaces)
+                {
+                    namespaceName += (thisNamespace.name + std::string("::"));
+                }
+
+                
+                std::stringstream typeTraitsStream_1;
+                typeTraitsStream_1 << "namespace XXX_NAMESPACE\n{\n";
+                typeTraitsStream_1 << indent << "namespace internal\n";
+                typeTraitsStream_1 << indent << "{\n";
+                if (candidate->isTemplated())
+                {
+                    typeTraitsStream_1 << extIndent << "template " << declaration.templateParameterDeclString << "\n";
+                }
+                typeTraitsStream_1 << extIndent << "struct provides_proxy_type<";
+                
+                // << namespaceName << declaration.name << declaration.templateParameterString << ">\n";
+
+                std::stringstream typeTraitsStream_2;
+                typeTraitsStream_2 << extIndent << "{\n";
+                typeTraitsStream_2 << extExtIndent << "static constexpr bool value = true;\n";
+                typeTraitsStream_2 << extIndent << "};\n";
+                typeTraitsStream_2 << indent << "}\n";
+                typeTraitsStream_2 << "}\n";
+
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), typeTraitsStream_1.str());
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), namespaceName + declaration.name + declaration.templateParameterString + std::string(">\n"));
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), typeTraitsStream_2.str() + std::string("\n"));
+
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), typeTraitsStream_1.str());
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), std::string("const ") + namespaceName + declaration.name + declaration.templateParameterString + std::string(">\n"));
+                rewriter.insert(getNextLine(candidate->bottomMostSourceLocation, context), typeTraitsStream_2.str());
+            }
+
         }
 
         std::string generateProxyClassConstructor(const ClassMetaData::Definition& definition)
@@ -846,6 +949,41 @@ namespace TRAFO_NAMESPACE
             const clang::SourceLocation fileStart = sourceManager.getLocForStartOfFile(fileId);
             const clang::SourceLocation fileEnd = sourceManager.getLocForEndOfFile(fileId);
 
+            // insert iterator class forward declaration (top level namespace) and include lines
+            {
+                const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
+                const clang::SourceLocation insertLocation = (declaration.namespaces.size() > 0 ? declaration.namespaces[0].sourceRange.getBegin() : declaration.sourceRange.getBegin());
+                
+                rewriter.insert(insertLocation, std::string("#include <common/memory.hpp>\n"));
+                rewriter.insert(insertLocation, std::string("#include <common/data_layout.hpp>\n\n"));
+                
+                const Indentation Indent = Indentation(declaration.indent.increment, declaration.indent.increment);
+                const std::string indent(Indent.value, ' ');
+                const Indentation ExtIndent = Indent + 1;
+                const std::string extIndent(ExtIndent.value, ' ');
+
+                std::stringstream iteratorForwardDeclStream;
+                iteratorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
+                iteratorForwardDeclStream << indent << "namespace internal \n";
+                iteratorForwardDeclStream << indent << "{\n";
+                iteratorForwardDeclStream << extIndent << "template <typename P, typename R>\n";
+                iteratorForwardDeclStream << extIndent << "class iterator;\n";
+                iteratorForwardDeclStream << indent << "}\n";
+                iteratorForwardDeclStream << "}\n\n";
+                rewriter.insert(insertLocation, iteratorForwardDeclStream.str());
+
+                std::stringstream accessorForwardDeclStream;
+                accessorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
+                accessorForwardDeclStream << indent << "namespace internal \n";
+                accessorForwardDeclStream << indent << "{\n";
+                accessorForwardDeclStream << extIndent << "template <typename X, std::size_t N, std::size_t D, XXX_NAMESPACE::data_layout L>\n";
+                accessorForwardDeclStream << extIndent << "class accessor;\n";
+                accessorForwardDeclStream << indent << "}\n";
+                accessorForwardDeclStream << "}\n\n";
+                rewriter.insert(insertLocation, accessorForwardDeclStream.str());
+            }
+
+
             // declarations for which proxy equivalents need to be generated
             const std::uint32_t numRelevantSourceRanges = candidate->relevantSourceRanges.size(); // is at least 1
             ClassMetaData::SourceRangeSet::const_iterator sourceRange = candidate->relevantSourceRanges.cbegin();
@@ -893,10 +1031,18 @@ namespace TRAFO_NAMESPACE
                 rewriter.replace(declaration.nameSourceRange, declaration.name + std::string("_proxy"));
             }
 
+            // target class namespace prefix
+            std::string targetClassNamespace;
+            for (const auto& thisNamespace : candidate->getDeclaration().namespaces)
+            {
+                targetClassNamespace += (thisNamespace.name + std::string("::"));
+            }
+
             // definitions
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
             for (const auto& definition : definitions)
             {
+
                 // insert proxy namespace
                 const Indentation Indent = definition.declaration.indent;
                 const std::string indent(Indent.value, ' ');
@@ -976,32 +1122,32 @@ namespace TRAFO_NAMESPACE
                 }
 
                 // insert meta data: original type
-                std::stringstream originalTypeStream;
-                if (definition.declaration.templateParameters.size() > 0)
+                std::stringstream originalType;
                 {
-                    originalTypeStream << "\n" << extIndent << "using original_type = typename std::conditional<is_const_type,\n" << extExtIndent << "const " << definition.name << "<";
+                    originalType << targetClassNamespace << definition.name;
                     std::uint32_t templateParameterId = 0;
                     for (const auto& templateParamter : definition.declaration.templateParameters)
                     {
-                        if (!templateParamter.isTypeParameter) continue;
+                        const std::string parameterName = (definition.isTemplatePartialSpecialization ? definition.templatePartialSpecializationArguments[templateParameterId].first : templateParamter.name) +
+                            std::string(templateParamter.isTypeParameter ? "_unqualified" : "");
 
-                        const std::string parameterName = templateParamter.name;
-
-                        originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
+                        originalType << (templateParameterId == 0 ? "<" : ", ") << parameterName;
                         ++templateParameterId;
+                        if (templateParameterId == definition.declaration.templateParameters.size())
+                        {
+                            originalType << ">";        
+                        }
                     }
-                    originalTypeStream << ">,\n" << extExtIndent << definition.name << "<";
-                    templateParameterId = 0;
-                    for (const auto& templateParamter : definition.declaration.templateParameters)
-                    {
-                        if (!templateParamter.isTypeParameter) continue;
+                }
 
-                        const std::string parameterName = templateParamter.name;
+                std::stringstream originalTypeStream;
+                if (definition.declaration.templateParameters.size() > 0)
+                {
+                    originalTypeStream << "\n" << extIndent << "using original_type = typename std::conditional<is_const_type,\n";
+                    originalTypeStream << extExtIndent << "const " << originalType.str() << ",\n";
+                    originalTypeStream << extExtIndent << originalType.str();
+                    originalTypeStream << ">::type;\n";
 
-                        originalTypeStream << (templateParameterId == 0 ? "" : ", ") << parameterName << "_unqualified";
-                        ++templateParameterId;
-                    }
-                    originalTypeStream << ">>::type;\n";
                 }
                 else
                 {
@@ -1043,20 +1189,27 @@ namespace TRAFO_NAMESPACE
                 {
                     if (!method.hasClassTypeArguments && !method.returnsClassType) continue;
 
-                    if (method.returnsClassType)
+                    // only return value is of class type
+                    if (method.returnsClassType && !method.hasClassTypeArguments)
                     {
-                        rewriter.replace(method.returnTypeSourceRange, definition.name + std::string("_proxy"));
+                        if (method.returnsClassTypeReference)
+                        {
+                            rewriter.replace(getSpellingSourceRange(method.returnTypeSourceRange, context), definition.name + std::string("_proxy"));
+                        }
+                        else
+                        {
+                            // TODO: fix that -> for some reason the closing bracket of the body is not included -> add "1"
+                            const clang::SourceRange selectionSourceRange(method.macroDefinitionSourceRange.getBegin(), method.macroDefinitionSourceRange.getEnd().getLocWithOffset(1));
+                            std::string selection = dumpSourceRangeToString(selectionSourceRange, sourceManager);
+                            findAndReplace(selection, definition.name, originalType.str(), true, true);
+                            rewriter.replace(selectionSourceRange, selection);
+                        }
                     }
 
+                    // return value and arguments can be of class type
                     if (method.hasClassTypeArguments)
                     {
-                        std::string targetNamespace;
-                        for (const auto& thisNamespace : definition.declaration.namespaces)
-                        {
-                            targetNamespace += (thisNamespace.name + std::string("::"));
-                        }
-
-                        modifyMethodSignature(definition, method, rewriter, std::string(""), targetNamespace, true);
+                        modifyMethodSignature(definition, method, rewriter, std::string(""), targetClassNamespace, true);
                     }
                 }
 
@@ -1089,13 +1242,33 @@ namespace TRAFO_NAMESPACE
                 llvm::raw_string_ostream outputStream(outputString);
                 rewriter.getEditBuffer(target->fileId).write(outputStream);
                 
-                std::string outputFilename(target->filename);
-                const std::size_t pos = outputFilename.rfind('/');
-                outputFilename.insert(pos != std::string::npos ? (pos + 1) : 0, "new_files/");
-                
-                std::ofstream out(outputFilename);
-                out << outputStream.str();
-                out.close();
+                {
+                    std::string outputFilename(target->filename);
+                    const std::size_t pos = outputFilename.rfind('/');
+
+                    if (const char* output_path = secure_getenv("CODE_TRAFO_OUTPUT_PATH"))
+                    {
+                        const std::string filename = outputFilename.substr(pos);
+                        outputFilename = std::string(output_path) + filename;
+                    }
+                    else
+                    {
+                        outputFilename.insert(pos != std::string::npos ? (pos + 1) : 0, "new_files/");
+                    }
+
+                    std::ofstream out(outputFilename);
+                    if (out)
+                    {
+                        out << outputStream.str();
+                        out.close();
+                    }
+                    else
+                    {
+                        std::cerr << "error: unable to open file " << outputFilename << std::endl << std::flush;
+                    }    
+                }
+
+                continue;
 
                 std::cout << "########################################################" << std::endl;
                 
@@ -1103,9 +1276,39 @@ namespace TRAFO_NAMESPACE
                 generateProxyClassDefinition(target, proxyClassCreator, std::string("// my header\n"));
 
                 // TODO: replace by writing back to file!
-                proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
+                //proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
+                outputStream.flush();
+                proxyClassCreator.getEditBuffer(target->fileId).write(outputStream);
 
-                std::cout << "########################################################" << std::endl;            
+                {
+                    std::string outputFilename(target->filename);
+
+                    if (const char* output_path = secure_getenv("CODE_TRAFO_OUTPUT_PATH"))
+                    {
+                        outputFilename = std::string(output_path);
+                    }
+                    else
+                    {
+                        const std::size_t pos = outputFilename.rfind('/');
+                        outputFilename = outputFilename.substr(0, pos) + std::string("/new_files");
+                    }
+                    outputFilename += (std::string("/autogen_") + target->name + std::string("_proxy.hpp"));
+                    
+                    std::ofstream out(outputFilename);
+                    if (out)
+                    {
+                        out << outputStream.str();
+                        out.close();
+                    }
+                    else
+                    {
+                        std::cerr << "error: unable to open file " << outputFilename << std::endl << std::flush;
+                    } 
+                }
+
+                //std::cout << "FILE: "
+
+                std::cout << "########################################################" << std::endl;
             }
         }
 
