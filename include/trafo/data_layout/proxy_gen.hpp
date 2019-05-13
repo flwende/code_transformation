@@ -1042,7 +1042,6 @@ namespace TRAFO_NAMESPACE
             const std::vector<ClassMetaData::Definition>& definitions = candidate->getDefinitions();
             for (const auto& definition : definitions)
             {
-
                 // insert proxy namespace
                 const Indentation Indent = definition.declaration.indent;
                 const std::string indent(Indent.value, ' ');
@@ -1053,23 +1052,18 @@ namespace TRAFO_NAMESPACE
                 // replace class name by proxy class name
                 rewriter.replace(definition.nameSourceRange, definition.name + std::string("_proxy"));
 
-                // using statement for accessor and iterator
+                // indentation
                 const Indentation ExtIndent = Indent + 1;
                 const std::string extIndent(ExtIndent.value, ' ');
                 const Indentation ExtExtIndent = ExtIndent + 1;
                 const std::string extExtIndent(ExtExtIndent.value, ' ');
 
-                if (!definition.declaration.isClass)
-                {
-                    rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("private:\n\n"));
-                }
+                // open private region
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("private:\n"));
 
-                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("template <typename _X, std::size_t _N, std::size_t _D, data_layout _L>\n") + extIndent + std::string("friend class XXX_NAMESPACE::internal::accessor;\n"));
+                // friend declarations
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("template <typename _X, std::size_t _N, std::size_t _D, XXX_NAMESPACE::data_layout _L>\n") + extIndent + std::string("friend class XXX_NAMESPACE::internal::accessor;\n"));
                 rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("template <typename _P, std::size_t _R>\n") + extIndent + std::string("friend class XXX_NAMESPACE::internal::iterator;\n"));
-
-                // insert meta data: type and const_type
-                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using type = ") + definition.name + std::string("_proxy") + definition.templateParameterString + std::string(";\n"));
-                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using const_type = ") + definition.name + std::string("_proxy") + definition.templateConstParameterString + std::string(";\n"));
 
                 // insert meta data: unqualified type
                 for (const auto& templateParamter : definition.declaration.templateParameters)
@@ -1080,6 +1074,34 @@ namespace TRAFO_NAMESPACE
 
                     rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using ") + parameterName + std::string("_unqualified = typename std::remove_cv<") + parameterName + std::string(">::type;\n"));
                 }
+
+                // insert meta data: is const type?
+                if (definition.declaration.templateParameters.size() > 0)
+                {
+                    std::stringstream isConstTypeStream;
+                    isConstTypeStream << "\n" << extIndent << "static constexpr bool is_const_type = (";
+                    std::uint32_t templateParameterId = 0;
+                    for (const auto& templateParamter : definition.declaration.templateParameters)
+                    {
+                        if (!templateParamter.isTypeParameter) continue;
+
+                        const std::string parameterName = templateParamter.name;
+
+                        isConstTypeStream << (templateParameterId == 0 ? "" : " || " ) << "std::is_const<" << parameterName << ">::value";
+                        ++templateParameterId;
+                    }
+                    isConstTypeStream << ");\n";
+                    rewriter.insert(definition.innerLocBegin, isConstTypeStream.str());
+                }
+
+                // open public region
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("public:\n"));
+
+                const clang::SourceLocation publicAccess = definition.accessSpecifiers[definition.indexPublicAccessSpecifiers[0]].scopeBegin;
+
+                // insert meta data: type and const_type
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using type = ") + definition.name + std::string("_proxy") + definition.templateParameterString + std::string(";\n"));
+                rewriter.insert(definition.innerLocBegin, std::string("\n") + extIndent + std::string("using const_type = ") + definition.name + std::string("_proxy") + definition.templateConstParameterString + std::string(";\n"));
 
                 // insert meta data: base pointer type?
                 std::stringstream basePointerStream;
@@ -1101,25 +1123,6 @@ namespace TRAFO_NAMESPACE
                 }
                 basePointerStream << ">;\n";
                 rewriter.insert(definition.innerLocBegin, basePointerStream.str());
-
-                // insert meta data: is const type?
-                if (definition.declaration.templateParameters.size() > 0)
-                {
-                    std::stringstream isConstTypeStream;
-                    isConstTypeStream << "\n" << extIndent << "static constexpr bool is_const_type = (";
-                    std::uint32_t templateParameterId = 0;
-                    for (const auto& templateParamter : definition.declaration.templateParameters)
-                    {
-                        if (!templateParamter.isTypeParameter) continue;
-
-                        const std::string parameterName = templateParamter.name;
-
-                        isConstTypeStream << (templateParameterId == 0 ? "" : " || " ) << "std::is_const<" << parameterName << ">::value";
-                        ++templateParameterId;
-                    }
-                    isConstTypeStream << ");\n";
-                    rewriter.insert(definition.innerLocBegin, isConstTypeStream.str());
-                }
 
                 // insert meta data: original type
                 std::stringstream originalType;
@@ -1156,9 +1159,10 @@ namespace TRAFO_NAMESPACE
                 
                 rewriter.insert(definition.innerLocBegin, originalTypeStream.str());
 
-                if (!definition.declaration.isClass)
+                // open private region for classes
+                if (definition.declaration.isClass)
                 {
-                    rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("public:\n\n"));
+                    rewriter.insert(definition.innerLocBegin, std::string("\n") + indent + std::string("private:\n"));
                 }
 
                 // constructors
@@ -1232,17 +1236,17 @@ namespace TRAFO_NAMESPACE
 
                 std::cout << "########################################################" << std::endl;
 
-                target->printInfo();
+                //target->printInfo();
                 
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);
 
                 //rewriter.getEditBuffer(target->fileId).write(llvm::outs());
-                std::string outputString;
-                llvm::raw_string_ostream outputStream(outputString);
-                rewriter.getEditBuffer(target->fileId).write(outputStream);
-                
                 {
+                    std::string outputString;
+                    llvm::raw_string_ostream outputStream(outputString);
+                    rewriter.getEditBuffer(target->fileId).write(outputStream);
+            
                     std::string outputFilename(target->filename);
                     const std::size_t pos = outputFilename.rfind('/');
 
@@ -1268,8 +1272,6 @@ namespace TRAFO_NAMESPACE
                     }    
                 }
 
-                continue;
-
                 std::cout << "########################################################" << std::endl;
                 
                 // generate proxy class definition
@@ -1277,10 +1279,12 @@ namespace TRAFO_NAMESPACE
 
                 // TODO: replace by writing back to file!
                 //proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
-                outputStream.flush();
-                proxyClassCreator.getEditBuffer(target->fileId).write(outputStream);
-
                 {
+                    std::string outputString;
+                    llvm::raw_string_ostream outputStream(outputString);
+                    
+                    proxyClassCreator.getEditBuffer(target->fileId).write(outputStream);
+
                     std::string outputFilename(target->filename);
 
                     if (const char* output_path = secure_getenv("CODE_TRAFO_OUTPUT_PATH"))
