@@ -34,8 +34,6 @@ namespace TRAFO_NAMESPACE
             // forward declaration
             class Definition;
 
-//        private:
-
             class AccessSpecifier
             {
                 clang::SourceLocation determineScopeBegin() const
@@ -1257,11 +1255,35 @@ namespace TRAFO_NAMESPACE
 
             virtual bool isTemplated() const = 0;
 
-            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false) = 0;
+            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false, const bool isInstantiated = true) = 0;
 
             virtual const Declaration& getDeclaration() const = 0;
 
             virtual const std::vector<Definition>& getDefinitions() const = 0;
+
+            virtual const std::vector<clang::SourceRange>& getDefinitionsSortedOut() const = 0;
+
+            SourceRangeSet& getRelevantSourceRanges()
+            {
+                return relevantSourceRanges;
+            }
+
+            const SourceRangeSet& getRelevantSourceRanges() const
+            {
+                return relevantSourceRanges;
+            }
+
+            void updateRelevantSourceRangeInfo() 
+            {
+                if (relevantSourceRanges.size() > 0)
+                {
+                    const auto& front = relevantSourceRanges.begin();
+                    const auto& back = relevantSourceRanges.rbegin();
+
+                    topMostSourceLocation = std::min(topMostSourceLocation, front->getBegin());
+                    bottomMostSourceLocation = std::max(topMostSourceLocation, back->getEnd());
+                }
+            }
 
             virtual void printInfo(const std::string indent = std::string("")) const = 0;
         };
@@ -1308,6 +1330,7 @@ namespace TRAFO_NAMESPACE
 
             const Base::Declaration declaration;
             std::vector<Base::Definition> definitions;
+            std::vector<clang::SourceRange> definitionsSortedOut;
 
             CXXClassMetaData(const clang::ClassTemplateDecl& decl, const bool isDefinition)
                 :
@@ -1317,9 +1340,15 @@ namespace TRAFO_NAMESPACE
                 determineRelevantSourceRanges();
             }
 
-            bool addDefintionKernel(const clang::CXXRecordDecl& decl, const clang::SourceRange& sourceRange, const bool isTemplatePartialSpecialization = false)
+            bool addDefintionKernel(const clang::CXXRecordDecl& decl, const clang::SourceRange& sourceRange, const bool isTemplatePartialSpecialization = false, const bool isInstantiated = true)
             {
                 if (decl.getNameAsString() != name) return false;
+
+                if (!isInstantiated)
+                {
+                    definitionsSortedOut.push_back(decl.getSourceRange());
+                    return true;
+                }
 
                 // definition already registered?
                 for (const auto& definition : definitions)
@@ -1343,9 +1372,12 @@ namespace TRAFO_NAMESPACE
 
                     return true;
                 }
-            
+
                 // no, it is not: then remove it!    
                 definitions.pop_back();
+
+                // sort it out
+                definitionsSortedOut.push_back(decl.getSourceRange());
 
                 return false;
             }
@@ -1370,7 +1402,7 @@ namespace TRAFO_NAMESPACE
                 return declaration;
             }
 
-            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
+            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false, const bool isInstantiated = true)
             {
                 // there can be only one definition for a CXXRecordDecl
                 if (definitions.size() > 0)
@@ -1379,12 +1411,17 @@ namespace TRAFO_NAMESPACE
                     return false;
                 }
 
-                return addDefintionKernel(decl, decl.getSourceRange(), isTemplatePartialSpecialization);
+                return addDefintionKernel(decl, decl.getSourceRange(), isTemplatePartialSpecialization, isInstantiated);
             }
 
             virtual const std::vector<Base::Definition>& getDefinitions() const
             {
                 return definitions;
+            }
+
+            const std::vector<clang::SourceRange>& getDefinitionsSortedOut() const
+            {
+                return definitionsSortedOut;
             }
 
             virtual void printInfo(const std::string indent = std::string("")) const
@@ -1403,6 +1440,7 @@ namespace TRAFO_NAMESPACE
             using Base = CXXClassMetaData;
             using Base::declaration;
             using Base::definitions;
+            using Base::definitionsSortedOut;
 
         public:
 
@@ -1416,11 +1454,11 @@ namespace TRAFO_NAMESPACE
                 return true;
             }
 
-            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false)
+            virtual bool addDefinition(const clang::CXXRecordDecl& decl, const bool isTemplatePartialSpecialization = false, const bool isInstantiated = true)
             {
                 const clang::ClassTemplateDecl* const classTemplateDecl = decl.getDescribedClassTemplate();
                 
-                return addDefintionKernel(decl, (classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()), isTemplatePartialSpecialization);
+                return addDefintionKernel(decl, (classTemplateDecl ? classTemplateDecl->getSourceRange() : decl.getSourceRange()), isTemplatePartialSpecialization, isInstantiated);
             }
 
             virtual void printInfo(const std::string indent = std::string("")) const

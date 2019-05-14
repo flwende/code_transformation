@@ -146,4 +146,15 @@ namespace TUPLE_NAMESPACE
     };    
     }
 
+    namespace proxy_internal
+    {
+    template <typename T_1, typename T_2, typename T_3>
+    std::ostream& operator<<(std::ostream& os, const tuple_proxy<T_1, T_2, T_3>& v)
+    {
+        os << "(" << v.x << "," << v.y << "," << v.z << ")";
+        return os;
+    }
+    }
 }
+
+#include "autogen_tuple_proxy_func.hpp"

@@ -12,9 +12,11 @@
 #include <set>
 #include <vector>
 #include <fstream>
+#include <algorithm>
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/PrettyPrinter.h>
 #include <clang/Lex/Preprocessor.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendActions.h>
@@ -392,6 +394,8 @@ namespace TRAFO_NAMESPACE
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
                           
+                            //std::cout << "ADD 1: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
+
                             proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, false));
                         }
                     });
@@ -409,6 +413,8 @@ namespace TRAFO_NAMESPACE
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
                             
+                            //std::cout << "ADD 2: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
+
                             for (auto& target : proxyClassTargets)
                             {
                                 if (target->addDefinition(*(decl->getTemplatedDecl()))) return;
@@ -425,17 +431,19 @@ namespace TRAFO_NAMESPACE
                     [this, &context] (const MatchFinder::MatchResult& result) mutable
                     {
                         if (const clang::ClassTemplatePartialSpecializationDecl* const decl = result.Nodes.getNodeAs<clang::ClassTemplatePartialSpecializationDecl>("classTemplatePartialSpecialization"))
-                        {
-                            if (!isThisClassInstantiated(decl)) return;
-                            
+                        {                         
                             const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
                             
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
 
+                            //std::cout << "ADD 3: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
+
+                            const bool isInstantiated = isThisClassInstantiated(decl);
+                            
                             for (std::size_t i = 0; i < proxyClassTargets.size(); ++i)
                             {
-                                if (proxyClassTargets[i]->addDefinition(*decl, true)) return;
+                                if (proxyClassTargets[i]->addDefinition(*decl, true, isInstantiated)) return;
                             }
                         }
                     });
@@ -462,9 +470,13 @@ namespace TRAFO_NAMESPACE
                                 {
                                     if (target->isTemplated()) return;
 
+                                    //std::cout << "ADD 4: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
+
                                     if (isDefinition && target->addDefinition(*decl, false)) return;
                                 }
                             }
+
+                            //std::cout << "ADD 4: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
                             
                             proxyClassTargets.emplace_back(new CXXClassMetaData(*decl, isDefinition));
                             if (isDefinition)
@@ -1224,6 +1236,78 @@ namespace TRAFO_NAMESPACE
                 }
             }
         }
+
+        std::vector<const clang::FunctionDecl*> findFunctionsWithTargetParameters(const ClassMetaData& target)
+        {
+            using namespace clang::ast_matchers;
+
+            Matcher matcher;
+            clang::ASTContext& context = target.context;
+            std::vector<const clang::FunctionDecl*> functions;
+            
+            //matcher.addMatcher(functionDecl(hasAnyParameter(hasType(asString(target.getDeclaration().name)))).bind("functionDeclaration"),
+            matcher.addMatcher(functionDecl().bind("functionDeclaration"),
+                    [this, &target, &context, &functions] (const MatchFinder::MatchResult& result) mutable
+                    {
+                        if (const clang::FunctionDecl* const decl = result.Nodes.getNodeAs<clang::FunctionDecl>("functionDeclaration"))
+                        {
+                            const std::string sourceLocationString = decl->getBeginLoc().printToString(context.getSourceManager());
+                            
+                            if (sourceLocationString.find("usr/lib") != std::string::npos ||
+                                sourceLocationString.find("usr/include") != std::string::npos) return;
+
+                            if (decl->getNumParams() == 0) return;
+
+                            bool hasTargetArgument = false;
+                            for (const auto& parameter : decl->parameters())
+                            {
+                                if (parameter->getType().getAsString().find(target.getDeclaration().name) != std::string::npos)
+                                {
+                                    hasTargetArgument = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasTargetArgument) return;
+
+                            // skip all functions that are within the definition of any of the classes considered
+                            for (const auto& definition : target.getDefinitions())
+                            {
+                                const std::size_t defBeginLine = getSpellingLineNumber(definition.sourceRange.getBegin(), context);
+                                const std::size_t defEndLine = getSpellingLineNumber(definition.sourceRange.getEnd(), context);
+                                const std::size_t declBeginLine = getSpellingLineNumber(decl->getSourceRange().getBegin(), context);
+
+                                if (defBeginLine < declBeginLine && declBeginLine < defEndLine) return;
+                            }
+
+                            for (const auto& definitionSourceRange : target.getDefinitionsSortedOut())
+                            {
+                                const std::size_t defBeginLine = getSpellingLineNumber(definitionSourceRange.getBegin(), context);
+                                const std::size_t defEndLine = getSpellingLineNumber(definitionSourceRange.getEnd(), context);
+                                const std::size_t declBeginLine = getSpellingLineNumber(decl->getSourceRange().getBegin(), context);
+
+                                if (defBeginLine < declBeginLine && declBeginLine < defEndLine) return;
+                            }
+
+                            const auto& it = std::lower_bound(functions.begin(), functions.end(), decl, [&context] (const clang::FunctionDecl* d_1, const clang::FunctionDecl* d_2)
+                                {
+                                    const std::size_t beginLoc_d_1 = getSpellingLineNumber(d_1->getSourceRange().getBegin(), context);
+                                    const std::size_t beginLoc_d_2 = getSpellingLineNumber(d_2->getSourceRange().getBegin(), context);
+                                    return (beginLoc_d_1 < beginLoc_d_2);
+                                });
+
+
+                            if (it == functions.end() || (*it)->getSourceRange() != decl->getSourceRange())
+                            {
+                                functions.insert(it, decl);
+                            }
+                        }
+                    });
+
+            matcher.run(target.context);
+
+            return functions;
+        }
         
         void addProxyClassToSource(const std::vector<std::unique_ptr<ClassMetaData>>& proxyClassTargets, clang::ASTContext& context)
         {
@@ -1234,7 +1318,23 @@ namespace TRAFO_NAMESPACE
             {
                 if (!target->containsProxyClassCandidates) continue;
 
-                std::cout << "########################################################" << std::endl;
+                // check if the source file containing the original code, also contains function definitions with class type paramters: add them if needed
+                std::vector<const clang::FunctionDecl*> functionsWithTargetParameters = findFunctionsWithTargetParameters(*target);
+
+                for (const auto& function : functionsWithTargetParameters)
+                {
+                    const clang::FileID fileId = context.getSourceManager().getFileID(function->getLocation());
+                    if (fileId == target->fileId)
+                    {
+                        const clang::FunctionTemplateDecl* templateFunctionDecl = function->getDescribedFunctionTemplate();
+                        const clang::SourceRange functionSourceRange = (templateFunctionDecl == nullptr ? function->getSourceRange() : templateFunctionDecl->getSourceRange());
+                        target->getRelevantSourceRanges().insert(clang::SourceRange(getBeginOfLine(functionSourceRange.getBegin(), context), functionSourceRange.getEnd()));
+                    }
+                }
+                target->updateRelevantSourceRangeInfo();
+
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
                 //target->printInfo();
                 
@@ -1272,10 +1372,46 @@ namespace TRAFO_NAMESPACE
                     }    
                 }
 
-                std::cout << "########################################################" << std::endl;
-                
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
+
                 // generate proxy class definition
                 generateProxyClassDefinition(target, proxyClassCreator, std::string("// my header\n"));
+
+                // process functions that are not within the class
+                for (auto it = functionsWithTargetParameters.begin(); it != functionsWithTargetParameters.end(); )
+                {
+                    const auto& function = *it;
+                    const clang::FileID fileId = context.getSourceManager().getFileID(function->getLocation());
+                    if (fileId == target->fileId)
+                    {
+                        const clang::FunctionTemplateDecl* templateFunctionDecl = function->getDescribedFunctionTemplate();
+                        const clang::SourceRange functionSourceRange = (templateFunctionDecl == nullptr ? function->getSourceRange() : templateFunctionDecl->getSourceRange());
+                        const std::string indent(getSpellingColumnNumber(functionSourceRange.getBegin(), context) - 1, ' ');
+                        std::string functionDefinition = dumpSourceRangeToString({functionSourceRange.getBegin(), functionSourceRange.getEnd().getLocWithOffset(1)}, context.getSourceManager());
+
+                        findAndReplace(functionDefinition, target->name, target->name + std::string("_proxy"), true, true);
+                        proxyClassCreator.replace(functionSourceRange, functionDefinition);
+
+                        const bool isInputOutputOperator = (function->getNameAsString() == std::string("operator<<") || function->getNameAsString() == std::string("operator>>"));
+                        if (isInputOutputOperator)
+                        {
+                            proxyClassCreator.insert(functionSourceRange.getBegin(), std::string("namespace ") + proxyNamespace + std::string("\n") + indent + std::string("{\n") + indent);
+                            proxyClassCreator.insert(functionSourceRange.getEnd().getLocWithOffset(1), std::string("\n") + indent + std::string("}"));
+                        }
+
+                       it = functionsWithTargetParameters.erase(it);
+                       continue;
+                    }
+
+                    ++it;
+                }
+
+
+                if (functionsWithTargetParameters.size() > 0)
+                {
+                    proxyClassCreator.insert(target->bottomMostSourceLocation.getLocWithOffset(1), std::string("\n\n#include \"") + std::string("autogen_") + target->name + std::string("_proxy_func.hpp\""));
+                }
 
                 // TODO: replace by writing back to file!
                 //proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
@@ -1310,9 +1446,211 @@ namespace TRAFO_NAMESPACE
                     } 
                 }
 
-                //std::cout << "FILE: "
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-                std::cout << "########################################################" << std::endl;
+                // transform all remaining functions with target class parameters
+                std::stringstream globalFunctionString;
+                for (const auto& function : functionsWithTargetParameters)
+                {
+                    // deduce namespaces
+                    std::string fn;
+                    llvm::raw_string_ostream fullNameRawString(fn);
+                    function->getNameForDiagnostic(fullNameRawString, clang::PrintingPolicy(clang::LangOptions()), true);
+                    std::string fullName = fullNameRawString.str();
+                    std::vector<std::string> namespaces;
+                    std::size_t pos = fullName.find("::");
+
+                    while (pos != std::string::npos)
+                    {
+                        namespaces.push_back(fullName.substr(0, pos));
+                        fullName = fullName.substr(pos + 2);
+                        pos = fullName.find("::");
+                    }
+
+                    // modify function signature
+                    const clang::FunctionTemplateDecl* templateFunctionDecl = function->getDescribedFunctionTemplate();
+                    const clang::SourceRange functionSourceRange = (templateFunctionDecl == nullptr ? function->getSourceRange() : templateFunctionDecl->getSourceRange());
+                    const std::string indent(getSpellingColumnNumber(functionSourceRange.getBegin(), context) - 1, ' ');
+                    const clang::SourceLocation parameterListBeginLoc = function->getParamDecl(0)->getSourceRange().getBegin();
+                    const clang::SourceLocation parameterListEndLoc = (function->hasBody() ? function->getBody()->getSourceRange().getBegin() : functionSourceRange.getEnd());
+                    std::string selection_1 = dumpSourceRangeToString({functionSourceRange.getBegin(), parameterListBeginLoc}, context.getSourceManager());
+                    std::string selection_2 = dumpSourceRangeToString({parameterListBeginLoc, parameterListEndLoc}, context.getSourceManager());
+                    std::string selection_3 = dumpSourceRangeToString({parameterListEndLoc, functionSourceRange.getEnd().getLocWithOffset(1)}, context.getSourceManager());
+
+                    std::string proxyTypeNamespacePrefix;
+                    for (const auto& ns : target->getDeclaration().namespaces)
+                    {
+                        proxyTypeNamespacePrefix += ns.name;
+                    }
+                    proxyTypeNamespacePrefix += std::string("::");
+                    std::string proxyTypeName = proxyTypeNamespacePrefix + proxyNamespace + std::string("::") + target->name + std::string("_proxy");
+
+                    if (function->getDeclaredReturnType()->isReferenceType())
+                    {
+                        findAndReplace(selection_1, proxyTypeNamespacePrefix + target->name, proxyTypeName, true, true);
+                        findAndReplace(selection_1, target->name, proxyTypeName, true, true);
+                    }
+                    findAndReplace(selection_2, proxyTypeNamespacePrefix + target->name, proxyTypeName, true, true);
+                    findAndReplace(selection_2, target->name, proxyTypeName, true, true);
+                    const std::size_t numNamespaces = namespaces.size();
+
+                    std::string extIndent;
+                    for (std::size_t i = 0; i < numNamespaces; ++i)
+                    {
+                        globalFunctionString << extIndent << "namespace " << namespaces[i] << "\n";
+                        globalFunctionString << extIndent << "{\n";
+
+                        extIndent += indent;
+                    }
+
+                    globalFunctionString << extIndent << selection_1;
+                    globalFunctionString << selection_2;
+                    globalFunctionString << selection_3 << std::endl;
+
+                    if (numNamespaces > 0)
+                    {
+                        for (std::size_t i = (numNamespaces - 1); i >= 0; --i)
+                        {
+                            extIndent = std::string("");
+                            for (std::size_t j = 0; j < i; ++j)
+                            {
+                                extIndent += indent;
+                            }
+                            globalFunctionString << extIndent << "}\n\n";
+
+                            if (i == 0) break;  
+                        }
+                    }
+                }
+
+                // write to file
+                if (functionsWithTargetParameters.size() > 0)
+                {
+                    std::string outputFilename(target->filename);
+
+                    if (const char* output_path = secure_getenv("CODE_TRAFO_OUTPUT_PATH"))
+                    {
+                        outputFilename = std::string(output_path);
+                    }
+                    else
+                    {
+                        const std::size_t pos = outputFilename.rfind('/');
+                        outputFilename = outputFilename.substr(0, pos) + std::string("/new_files");
+                    }
+                    outputFilename += (std::string("/autogen_") + target->name + std::string("_proxy_func.hpp"));
+
+                    std::ofstream out(outputFilename);
+                    if (out)
+                    {
+                        out << globalFunctionString.str();
+                        out.close();
+                    }
+                    else
+                    {
+                        std::cerr << "error: unable to open file " << outputFilename << std::endl << std::flush;
+                    }
+                }
+            }
+        }
+
+        void modifyIncludeStatements(const std::vector<std::unique_ptr<ClassMetaData>>& proxyClassTargets, clang::ASTContext& context)
+        {
+            static bool insertBufferIncludeLine = true;
+
+            for (const auto& target : proxyClassTargets)
+            {
+                const clang::SourceLocation includeLocation = target->sourceManager.getIncludeLoc(target->fileId);
+                const clang::SourceLocation includeLineBegin = getBeginOfLine(includeLocation, target->context);
+                const clang::SourceLocation includeLineEnd = getNextLine(includeLocation, target->context).getLocWithOffset(-1);
+                const std::size_t includeLineLength = getSpellingColumnNumber(includeLineEnd, target->context) - getSpellingColumnNumber(includeLineBegin, target->context);
+
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(target->sourceManager.getFileID(includeLocation));
+                rewriteBuffer.ReplaceText(target->sourceManager.getFileOffset(includeLineBegin), includeLineLength, std::string("#include \"") + target->name + std::string(".hpp\""));
+
+                if (insertBufferIncludeLine)
+                {
+                    rewriteBuffer.InsertTextBefore(target->sourceManager.getFileOffset(includeLineBegin), std::string("#include <buffer/buffer.hpp>\n"));
+                    //insertBufferIncludeLine = false;
+                }
+            }
+        }
+
+        void modifyDeclarations(clang::ASTContext& context)
+        {
+            std::set<clang::FileID> outputFiles;
+            const clang::SourceManager& sourceManager = context.getSourceManager();
+
+            for (const auto& declaration : declarations)
+            {
+                declaration->printInfo(context.getSourceManager());
+                //std::cout << declaration->sourceRange.printToString(context.getSourceManager()) << std::endl;
+
+                const clang::SourceLocation declBegin = declaration->sourceRange.getBegin();
+                const clang::SourceLocation declEnd = declaration->sourceRange.getEnd().getLocWithOffset(1);
+                const std::size_t declLength = getSpellingColumnNumber(declEnd, context) - getSpellingColumnNumber(declBegin, context);
+
+                const clang::FileID fileId = context.getSourceManager().getFileID(declBegin);
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(fileId);
+                outputFiles.insert(fileId);
+
+                std::stringstream newDeclaration;
+                //newDeclaration << "XXX_NAMESPACE::buffer<" << declaration->elementDataTypeNamespace << declaration->elementDataTypeName << ", ";
+                newDeclaration << "XXX_NAMESPACE::buffer<" << declaration->elementDataType.getAsString() << ", ";
+                newDeclaration << declaration->getNestingLevel() + 1 << ", ";
+                newDeclaration << "XXX_NAMESPACE::data_layout::SoA> ";
+                newDeclaration << declaration->decl.getNameAsString();
+
+                bool nonZeroExtent = true;
+                for (std::size_t i = 0; i <= declaration->getNestingLevel(); ++i)
+                {
+                    nonZeroExtent &= (declaration->getExtent().at(i) != 0);
+                }
+
+                if (nonZeroExtent)
+                {
+                    newDeclaration << "{{";
+                    for (std::size_t i = 0; i <= declaration->getNestingLevel(); ++i)
+                    {
+                        newDeclaration << (i == 0 ? "" : ", ") << declaration->getExtentString().at(i);
+                    }
+                    newDeclaration << "}}";
+                }
+                newDeclaration << ";";
+
+                rewriteBuffer.ReplaceText(context.getSourceManager().getFileOffset(declBegin), declLength, newDeclaration.str());
+            }
+
+            for (const clang::FileID fileId : outputFiles)
+            {
+                clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(fileId);
+                std::string outputString;
+                llvm::raw_string_ostream outputStream(outputString);
+                rewriteBuffer.write(outputStream);
+
+                std::string outputFilename = sourceManager.getFilename(sourceManager.getLocForEndOfFile(fileId)).str();
+                const std::size_t pos = outputFilename.rfind('/');
+
+                if (const char* output_path = secure_getenv("CODE_TRAFO_OUTPUT_PATH"))
+                {
+                    const std::string filename = outputFilename.substr(pos);
+                    outputFilename = std::string(output_path) + filename;
+                }
+                else
+                {
+                    outputFilename.insert(pos != std::string::npos ? (pos + 1) : 0, "new_files/");
+                }
+                
+                std::ofstream out(outputFilename);
+                if (out)
+                {
+                    out << outputStream.str();
+                    out.close();
+                }
+                else
+                {
+                    std::cerr << "error: unable to open file " << outputFilename << std::endl << std::flush;
+                }
             }
         }
 
@@ -1356,6 +1694,12 @@ namespace TRAFO_NAMESPACE
 
             // step 3: add proxy classes
             addProxyClassToSource(proxyClassTargets, context);
+
+            // step 4: adapt includes
+            modifyIncludeStatements(proxyClassTargets, context);
+
+            // step 5: adapt declarations
+            modifyDeclarations(context);
         }
     };
 

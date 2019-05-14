@@ -151,4 +151,31 @@ namespace VEC_NAMESPACE
     };    
     }
 
+    namespace proxy_internal
+    {
+    template <typename T>
+    std::ostream& operator<<(std::ostream& os, const vec_proxy<T, 1>& v)
+    {
+        os << "(" << v.x << ")";
+        return os;
+    }
+    }
+    namespace proxy_internal
+    {
+    template <typename T>
+    std::ostream& operator<<(std::ostream& os, const vec_proxy<T, 2>& v)
+    {
+        os << "(" << v.x << "," << v.y << ")";
+        return os;
+    }
+    }
+    namespace proxy_internal
+    {
+    template <typename T>
+    std::ostream& operator<<(std::ostream& os, const vec_proxy<T, 3>& v)
+    {
+        os << "(" << v.x << "," << v.y << "," << v.z << ")";
+        return os;
+    }
+    }
 }
