@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <array>
 #include <vec/vec.hpp>
 #include <tuple/tuple.hpp>
 

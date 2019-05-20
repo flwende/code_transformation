@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <array>
 #include <buffer/buffer.hpp>
 #include "vec.hpp"
 #include <buffer/buffer.hpp>

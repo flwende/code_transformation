@@ -25,12 +25,6 @@ namespace TUPLE_NAMESPACE
     //! \tparam T_2 data type
     //! \tparam T_3 data type
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    namespace proxy_internal
-    {
-        template <typename T_1, typename T_2, typename T_3>
-        class tuple_proxy;
-    }
-
     template <typename T_1, typename T_2, typename T_3>
     class tuple
     {
@@ -47,9 +41,6 @@ namespace TUPLE_NAMESPACE
         static_assert(!std::is_volatile<T_3>::value, "error: T_3 is volatile -> not allowed");
 
     public:
-        using type = tuple<T_1, T_2, T_3>;
-
-        using proxy_type = typename fw::proxy_internal::tuple_proxy<T_1, T_2, T_3>;
 
         T_1 x;
         T_2 y;
@@ -63,8 +54,6 @@ namespace TUPLE_NAMESPACE
 
         template <typename X_1, typename X_2, typename X_3>
         tuple(const tuple<X_1, X_2, X_3>& t) : x(t.x), y(t.y), z(t.z) {}
-        template <typename X_1, typename X_2, typename X_3>
-        tuple(const proxy_internal::tuple_proxy<X_1, X_2, X_3>& t) : x(t.x), y(t.y), z(t.z) {}
         
         //! Some operators
         inline tuple operator-() const
@@ -83,15 +72,10 @@ namespace TUPLE_NAMESPACE
         }                                                           \
         
         MACRO(=, tuple)
-        MACRO(=, proxy_internal::tuple_proxy)
         MACRO(+=, tuple)
-        MACRO(+=, proxy_internal::tuple_proxy)
         MACRO(-=, tuple)
-        MACRO(-=, proxy_internal::tuple_proxy)
         MACRO(*=, tuple)
-        MACRO(*=, proxy_internal::tuple_proxy)
         MACRO(/=, tuple)
-        MACRO(/=, proxy_internal::tuple_proxy)
 
     #undef MACRO
 
@@ -119,34 +103,6 @@ namespace TUPLE_NAMESPACE
     {
         os << "(" << v.x << "," << v.y << "," << v.z << ")";
         return os;
-    }
-}
-
-#include "autogen_tuple_proxy.hpp"
-
-#include <common/traits.hpp>
-
-namespace XXX_NAMESPACE
-{
-    namespace internal
-    {
-        template <typename T_1, typename T_2, typename T_3>
-        struct provides_proxy_type<fw::tuple<T_1, T_2, T_3>>
-        {
-            static constexpr bool value = true;
-        };
-    }
-}
-
-namespace XXX_NAMESPACE
-{
-    namespace internal
-    {
-        template <typename T_1, typename T_2, typename T_3>
-        struct provides_proxy_type<const fw::tuple<T_1, T_2, T_3>>
-        {
-            static constexpr bool value = true;
-        };
     }
 }
 

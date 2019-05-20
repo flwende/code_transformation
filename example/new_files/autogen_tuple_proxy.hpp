@@ -72,8 +72,6 @@ namespace TUPLE_NAMESPACE
 
     public:
 
-        using value_type = typename XXX_NAMESPACE::internal::compare<T_1, typename XXX_NAMESPACE::internal::compare<T_2, T_3>::stronger_type>::stronger_type;
-
         T_1& x;
         T_2& y;
         T_3& z;
