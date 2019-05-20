@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Florian Wende (flwende@gmail.com)
+// Copyright (c) 2017-2019 Florian Wende (flwende@gmail.com)
 //
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
@@ -162,34 +162,6 @@ namespace TRAFO_NAMESPACE
             return sourceRange;
         }
 
-        /*
-        static std::string dumpStmtToString(const clang::Stmt* const stmt, const clang::SourceManager& sourceManager)
-        {
-            // return empty string if 'stmt' is invalid
-            if (!stmt) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            // note: 'const' reference is casted away (looks like the signature of 'dump' is inappropriate)!
-            stmt->dump(streamBuffer, const_cast<clang::SourceManager&>(sourceManager)); // dump content of 'stmt' to 'streamBuffer'
-            
-            return streamBuffer.str(); // get content of 'streamBuffer'
-        }
-        
-        static std::string dumpDeclToString(const clang::Decl* const decl)
-        {
-            // return empty string if 'decl' is invalid
-            if (!decl) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            decl->dump(streamBuffer); // dump content of 'decl' to 'streamBuffer'
-
-            return streamBuffer.str(); // get content of 'streamBuffer'
-        }
-        */
         static std::string dumpStmtToStringHumanReadable(const clang::Stmt* const stmt, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
         {
             // return empty string if 'stmt' is invalid
@@ -207,26 +179,7 @@ namespace TRAFO_NAMESPACE
         {
             return dumpStmtToStringHumanReadable(stmt, clang::LangOptions(), insertLeadingNewline);
         }
-        /*
-        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const clang::LangOptions& langOpts, const bool insertLeadingNewline)
-        {
-            // return empty string if 'decl' is invalid
-            if (!decl) return std::string("");
-            
-            std::string buffer; // will hold the content
-            llvm::raw_string_ostream streamBuffer(buffer); // streamBuffer using 'buffer' as internal storage
-
-            decl->print(streamBuffer, clang::PrintingPolicy(langOpts), 0); // dump content of 'decl' to 'streamBuffer'
-
-            return (insertLeadingNewline ? std::string("\n") : std::string("")) + streamBuffer.str(); // get content of 'streamBuffer'
-        }
-
-        static std::string dumpDeclToStringHumanReadable(const clang::Decl* const decl, const bool insertLeadingNewline)
-        {
-            return dumpDeclToStringHumanReadable(decl, clang::LangOptions(), insertLeadingNewline);
-        }
-        */
-
+        
         static std::string dumpSourceRangeToString(const clang::SourceRange sourceRange, const clang::SourceManager& sourceManager, const clang::LangOptions& langOpts)
         {
             if (!sourceRange.isValid()) return std::string("");

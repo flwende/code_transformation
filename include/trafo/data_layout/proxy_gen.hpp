@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Florian Wende (flwende@gmail.com)
+// Copyright (c) 2017-2019 Florian Wende (flwende@gmail.com)
 //
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
@@ -38,213 +38,7 @@
 namespace TRAFO_NAMESPACE
 {
     using namespace TRAFO_NAMESPACE::internal;
-    /*
-    class ClassDefinition : public clang::ast_matchers::MatchFinder::MatchCallback
-    {
-    protected:
 
-        Rewriter& rewriter;
-        std::vector<ClassMetaData> targetClasses;
-
-        std::string createProxyClassStandardConstructor(ClassMetaData& thisClass, const clang::CXXRecordDecl& decl) const
-        {
-            std::string constructor = thisClass.name + std::string("_proxy(");
-
-            if (thisClass.hasMultiplePublicFieldTypes)
-            {
-                std::cerr << thisClass.name << ": createProxyClassStandardConstructor: not implemented yet" << std::endl;
-            }
-            else
-            {
-                std::string publicFieldType;
-                for (auto field : thisClass.fields)
-                {
-                    if (field.isPublic)
-                    {
-                        publicFieldType = field.typeName;
-                        break;
-                    }
-                }
-
-                constructor += publicFieldType + std::string("* ptr, const std::size_t n");
-                if (thisClass.numFields > thisClass.numPublicFields)
-                {
-                    for (auto field : thisClass.fields)
-                    {
-                        if (!field.isPublic)
-                        {
-                            constructor +=  std::string(", ") + field.typeName + std::string(" ") + field.name;
-                        }
-                    }
-                }
-                constructor += ")\n\t:\n\t";
-
-                std::uint32_t publicFieldId = 0;
-                std::uint32_t fieldId = 0;
-                for (auto field : thisClass.fields)
-                {
-                    if (field.isPublic)
-                    {
-                        constructor += field.name + std::string("(ptr[") + std::to_string(publicFieldId) + std::string(" * n])");
-                        ++publicFieldId;
-                    }
-                    else
-                    {
-                        constructor += field.name + std::string("(") + field.name + std::string(")");
-                    }
-
-                    constructor += std::string((fieldId + 1) == thisClass.numFields ? "\n\t{ ; }" : ",\n\t");
-                    ++fieldId;
-                }
-            }
-
-            return constructor;
-        }
-
-        // generate proxy class definition
-        void generateProxyClass(ClassMetaData& thisClass)
-        {
-            const clang::CXXRecordDecl& decl = thisClass.decl;
-            clang::ASTContext& context = thisClass.context;
-
-            // replace class name
-            rewriter.replace(decl.getLocation(), thisClass.name + "_proxy");
-
-            // remove original constructors
-            for (auto ctor : decl.ctors())
-            {
-                rewriter.replace(ctor->getSourceRange(), "// constructor: removed");    
-            }
-
-            // insert constructor
-            const std::string constructor = createProxyClassStandardConstructor(thisClass, decl) + "\n";
-            if (thisClass.publicConstructors.size() > 0)
-            {
-                rewriter.replace(thisClass.publicConstructors[0].decl.getSourceRange(), constructor);
-            }
-            else
-            {
-                const clang::SourceLocation location = thisClass.publicScopeStart();
-                rewriter.insert(location, "\n\t" + constructor, true, true);
-            }
-
-            // public variables: add reference qualifier
-            addReferenceQualifierToPublicFields(thisClass, rewriter);
-        }
-
-        virtual void addReferenceQualifierToPublicFields(ClassMetaData& , Rewriter& rewriter) = 0;
-
-    public:
-        
-        ClassDefinition(Rewriter& rewriter)
-            :
-            rewriter(rewriter)
-        { ; }
-    };
-
-    class CXXClassDefinition : public ClassDefinition
-    {
-        using Base = ClassDefinition;
-        using Base::rewriter;
-        using Base::targetClasses;
-
-        virtual void addReferenceQualifierToPublicFields(ClassMetaData& thisClass, Rewriter& rewriter)
-        {
-            using namespace clang::ast_matchers;
-            
-            rewriter.addMatcher(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(hasName(thisClass.name))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
-                { 
-                    if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
-                    {        
-                        rewriter.replace(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
-                    }
-                });
-            rewriter.run(thisClass.context);
-            rewriter.clear();
-        }
-
-    public:
-        
-        CXXClassDefinition(Rewriter& rewriter)
-            :
-            Base(rewriter)
-        { ; }
-
-        virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
-        {
-            if (const clang::CXXRecordDecl* decl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("classDecl"))
-            {
-                targetClasses.emplace_back(*decl, *result.Context, false);
-                ClassMetaData& thisClass = targetClasses.back();
-
-                if (thisClass.isProxyClassCandidate)
-                {      
-                    const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
-                    Base::generateProxyClass(thisClass);
-                    rewriter.insert(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
-                }
-                else
-                {
-                    targetClasses.pop_back();
-                }
-            }
-        }
-    };
-
-    class ClassTemplateDefinition : public ClassDefinition
-    {
-        using Base = ClassDefinition;
-        using Base::rewriter;
-        using Base::targetClasses;
-
-        virtual void addReferenceQualifierToPublicFields(ClassMetaData& thisClass, Rewriter& rewriter)
-        {
-            using namespace clang::ast_matchers;
-            
-            rewriter.addMatcher(fieldDecl(allOf(isPublic(), hasParent(cxxRecordDecl(allOf(hasName(thisClass.name), unless(isTemplateInstantiation())))))).bind("fieldDecl"),
-                [] (const MatchFinder::MatchResult& result, Rewriter& rewriter)
-                { 
-                    if (const clang::FieldDecl* decl = result.Nodes.getNodeAs<clang::FieldDecl>("fieldDecl"))
-                    {        
-                        rewriter.replace(decl->getSourceRange(), decl->getType().getAsString() + "& " + decl->getNameAsString());
-                    }
-                });
-            rewriter.run(thisClass.context);
-            rewriter.clear();
-        }
-
-    public:
-        
-        ClassTemplateDefinition(Rewriter& rewriter)
-            :
-            Base(rewriter)
-        { ; }
-        
-        virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result)
-        {
-            if (const clang::ClassTemplateDecl* decl = result.Nodes.getNodeAs<clang::ClassTemplateDecl>("classTemplateDecl"))
-            {
-                const bool isTemplatedDefinition = decl->isThisDeclarationADefinition();
-                if (!isTemplatedDefinition) return;
-
-                targetClasses.emplace_back(*(decl->getTemplatedDecl()), *result.Context, true);
-                ClassMetaData& thisClass = targetClasses.back();
-                
-                if (thisClass.isProxyClassCandidate)
-                {
-                    const std::string original_class = dumpDeclToStringHumanReadable(decl, rewriter.getLangOpts(), false);
-                    Base::generateProxyClass(thisClass);
-                    rewriter.insert(decl->getSourceRange().getBegin(), original_class + ";\n\n", true, true);
-                }
-                else
-                {
-                    targetClasses.pop_back();
-                }
-            }
-        }
-    };
-    */
     class InsertProxyClassImplementation : public clang::ASTConsumer
     {
         Rewriter rewriter;
@@ -309,25 +103,6 @@ namespace TRAFO_NAMESPACE
                     });
             }
 
-/*
-            FIX THAT
-            matcher.addMatcher(varDecl(hasType(cxxRecordDecl(anyOf(hasName("vector"), hasName("array"))))).bind("varDecl"),
-                [&containerNames, &context, this] (const MatchFinder::MatchResult& result) mutable
-                {
-                    if (const clang::VarDecl* const decl = result.Nodes.getNodeAs<clang::VarDecl>("varDecl"))
-                    {
-                        ContainerDeclaration containerDecl = ContainerDeclaration::make(*decl, context, containerNames);
-                        const clang::Type* const type = containerDecl.elementDataType.getTypePtrOrNull();
-                        const bool isRecordType = (type ? type->isRecordType() : false);
-
-                        if (!containerDecl.elementDataType.isNull() && isRecordType)
-                        {
-                            declarations.push_back(new ContainerDeclaration(containerDecl));
-                            proxyClassTargetNames.insert(containerDecl.elementDataTypeName);
-                        }
-                    }
-                });
-*/
             matcher.addMatcher(varDecl(hasType(constantArrayType())).bind("constArrayDecl"),
                 [&context, this] (const MatchFinder::MatchResult& result) mutable
                 {
@@ -346,12 +121,7 @@ namespace TRAFO_NAMESPACE
                 });
 
             matcher.run(context);
-            /*
-            for (const auto& declaration : declarations)
-            {
-                declaration->printInfo(context.getSourceManager());
-            }
-            */
+
             return (declarations.size() > 0);
         }
 
@@ -360,25 +130,7 @@ namespace TRAFO_NAMESPACE
             using namespace clang::ast_matchers;
 
             Matcher matcher;
-/*
-            REMOVE: JUST FOR TESTING
 
-            std::cout << "######################## HERE ##########################" << std::endl;
-            //matcher.addMatcher(fieldDecl(allOf(isPublic, hasName("x"), hasParent(recordDecl().bind("targetDecl")))),
-            matcher.addMatcher(fieldDecl(allOf(isPublic(), hasName("x"), hasParent(recordDecl().bind("targetDecl")))),
-                [] (const MatchFinder::MatchResult& result) mutable
-                {
-                    if (const clang::RecordDecl* const decl = result.Nodes.getNodeAs<clang::RecordDecl>("targetDecl"))
-                    {
-                        std::cout << "record name: " << decl->getNameAsString() << std::endl;
-                    }
-                });
-            matcher.run(context);
-
-            std::cout << "######################## HERE ##########################" << std::endl;
-
-            return false;
-*/
             for (auto name : proxyClassTargetNames)
             {
                 // template class declarations
@@ -393,8 +145,6 @@ namespace TRAFO_NAMESPACE
                             
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
-                          
-                            //std::cout << "ADD 1: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
 
                             proxyClassTargets.emplace_back(new TemplateClassMetaData(*decl, false));
                         }
@@ -413,8 +163,6 @@ namespace TRAFO_NAMESPACE
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
                             
-                            //std::cout << "ADD 2: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
-
                             for (auto& target : proxyClassTargets)
                             {
                                 if (target->addDefinition(*(decl->getTemplatedDecl()))) return;
@@ -436,8 +184,6 @@ namespace TRAFO_NAMESPACE
                             
                             if (sourceLocationString.find("usr/lib") != std::string::npos ||
                                 sourceLocationString.find("usr/include") != std::string::npos) return;
-
-                            //std::cout << "ADD 3: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
 
                             const bool isInstantiated = isThisClassInstantiated(decl);
                             
@@ -470,14 +216,10 @@ namespace TRAFO_NAMESPACE
                                 {
                                     if (target->isTemplated()) return;
 
-                                    //std::cout << "ADD 4: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
-
                                     if (isDefinition && target->addDefinition(*decl, false)) return;
                                 }
                             }
 
-                            //std::cout << "ADD 4: " << decl->getNameAsString() << ", " << decl->getSourceRange().printToString(context.getSourceManager()) << std::endl;
-                            
                             proxyClassTargets.emplace_back(new CXXClassMetaData(*decl, isDefinition));
                             if (isDefinition)
                             {
@@ -591,25 +333,7 @@ namespace TRAFO_NAMESPACE
 
             return constructorDefinition.str();
         }
-/*
-        std::string createMethodWithProxyArguments(const internal::ClassMetaData::Function& method)
-        {
-            clang::ASTContext& context = method.decl.getASTContext();
-            const clang::SourceManager& sourceManager = context.getSourceManager();
-            std::string methodString;
 
-            if (method.isMacroExpansion)
-            {
-                methodString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);
-            }
-            else
-            {
-                methodString = dumpSourceRangeToString(getExpansionSourceRange(method.sourceRange, context), sourceManager);
-            }
-
-            return (methodString + std::string("\n"));
-        }
-*/
         void modifyMethodSignature(const ClassMetaData::Definition& definition, const ClassMetaData::Function& method, Rewriter& rewriter, const std::string proxyNamespace, const std::string targetNamespace, const bool returnProxyType = false)
         {
             clang::ASTContext& context = definition.declaration.getASTContext();
@@ -618,7 +342,6 @@ namespace TRAFO_NAMESPACE
             const Indentation insideClassIndent = definition.declaration.indent + 1;
             const std::string indent(insideClassIndent.value, ' ');
             const std::string extIndent((insideClassIndent + 1).value, ' ');
-            //const std::string proxyTypeName = proxyNamespace + std::string("::") + method.className + std::string("_proxy");
             const std::string proxyTypeName = proxyNamespace + method.className + std::string("_proxy");
             const std::string targetTypeName = targetNamespace + method.className;
 
@@ -639,7 +362,6 @@ namespace TRAFO_NAMESPACE
                 if (returnProxyType && method.returnsClassTypeReference)
                 {
                     const clang::SourceLocation beginLoc = getSpellingSourceLocation(method.returnTypeSourceRange.getBegin(), context);
-                    //const clang::SourceLocation endLoc = method.macroDefinitionSourceRange.getEnd();
                     const clang::SourceLocation endLoc = getSpellingSourceLocation(method.bodySourceRange.getBegin(), context).getLocWithOffset(-1);
                     std::string selection = dumpSourceRangeToString({beginLoc, endLoc}, sourceManager);
                     findAndReplace(selection, method.className, proxyTypeName, true, true);
@@ -751,41 +473,7 @@ namespace TRAFO_NAMESPACE
             clang::ASTContext& context = declaration.getASTContext();
             const clang::SourceManager& sourceManager = declaration.getSourceManager();
             const clang::FileID fileId = declaration.fileId;
-/*
-            // insert iterator class forward declaration (top level namespace) and include lines
-            {
-                const ClassMetaData::Declaration& declaration = candidate->getDeclaration();
-                const clang::SourceLocation insertLocation = (declaration.namespaces.size() > 0 ? declaration.namespaces[0].sourceRange.getBegin() : declaration.sourceRange.getBegin());
-                
-                rewriter.insert(insertLocation, std::string("#include <common/memory.hpp>\n"));
-                rewriter.insert(insertLocation, std::string("#include <common/data_layout.hpp>\n\n"));
-                
-                const Indentation Indent = Indentation(declaration.indent.increment, declaration.indent.increment);
-                const std::string indent(Indent.value, ' ');
-                const Indentation ExtIndent = Indent + 1;
-                const std::string extIndent(ExtIndent.value, ' ');
 
-                std::stringstream iteratorForwardDeclStream;
-                iteratorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
-                iteratorForwardDeclStream << indent << "namespace " << proxyNamespace << "\n";
-                iteratorForwardDeclStream << indent << "{\n";
-                iteratorForwardDeclStream << extIndent << "template <typename P, typename R>\n";
-                iteratorForwardDeclStream << extIndent << "class XXX_NAMESPACE::internal::iterator;\n";
-                iteratorForwardDeclStream << indent << "}\n";
-                iteratorForwardDeclStream << "}\n\n";
-                rewriter.insert(insertLocation, iteratorForwardDeclStream.str());
-
-                std::stringstream accessorForwardDeclStream;
-                accessorForwardDeclStream << "namespace XXX_NAMESPACE\n{\n";
-                accessorForwardDeclStream << indent << "namespace " << proxyNamespace << "\n";
-                accessorForwardDeclStream << indent << "{\n";
-                accessorForwardDeclStream << extIndent << "template <typename X, std::size_t N, std::size_t D, XXX_NAMESPACE::data_layout L>\n";
-                iteratorForwardDeclStream << extIndent << "class XXX_NAMESPACE::internal::accessor;\n";
-                accessorForwardDeclStream << indent << "}\n";
-                accessorForwardDeclStream << "}\n\n";
-                rewriter.insert(insertLocation, accessorForwardDeclStream.str());
-            }
-*/
             // insert proxy class forward declaration
             rewriter.insert(getBeginOfLine(declaration.sourceRange.getBegin(), context), generateProxyClassDeclaration(declaration));
             
@@ -868,8 +556,6 @@ namespace TRAFO_NAMESPACE
                     typeTraitsStream_1 << extIndent << "template " << declaration.templateParameterDeclString << "\n";
                 }
                 typeTraitsStream_1 << extIndent << "struct provides_proxy_type<";
-                
-                // << namespaceName << declaration.name << declaration.templateParameterString << ">\n";
 
                 std::stringstream typeTraitsStream_2;
                 typeTraitsStream_2 << extIndent << "{\n";
@@ -1017,7 +703,6 @@ namespace TRAFO_NAMESPACE
                 if (toBeRemoved.isValid() && toBeRemoved.getBegin() != toBeRemoved.getEnd())
                 {
                     rewriter.remove(toBeRemoved);
-                    //rewriter.replace(toBeRemoved, std::string("\n"));
                 }
             }
 
@@ -1245,7 +930,6 @@ namespace TRAFO_NAMESPACE
             clang::ASTContext& context = target.context;
             std::vector<const clang::FunctionDecl*> functions;
             
-            //matcher.addMatcher(functionDecl(hasAnyParameter(hasType(asString(target.getDeclaration().name)))).bind("functionDeclaration"),
             matcher.addMatcher(functionDecl().bind("functionDeclaration"),
                     [this, &target, &context, &functions] (const MatchFinder::MatchResult& result) mutable
                     {
@@ -1336,12 +1020,9 @@ namespace TRAFO_NAMESPACE
                 //////////////////////////////////////////////////////////////////////////////////////////////////////////
                 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-                //target->printInfo();
-                
                 // modify original source code
                 modifyOriginalSourceCode(target, rewriter);
 
-                //rewriter.getEditBuffer(target->fileId).write(llvm::outs());
                 {
                     std::string outputString;
                     llvm::raw_string_ostream outputStream(outputString);
@@ -1413,8 +1094,6 @@ namespace TRAFO_NAMESPACE
                     proxyClassCreator.insert(target->bottomMostSourceLocation.getLocWithOffset(1), std::string("\n\n#include \"") + std::string("autogen_") + target->name + std::string("_proxy_func.hpp\""));
                 }
 
-                // TODO: replace by writing back to file!
-                //proxyClassCreator.getEditBuffer(target->fileId).write(llvm::outs());
                 {
                     std::string outputString;
                     llvm::raw_string_ostream outputStream(outputString);
@@ -1556,8 +1235,6 @@ namespace TRAFO_NAMESPACE
 
         void modifyIncludeStatements(const std::vector<std::unique_ptr<ClassMetaData>>& proxyClassTargets, clang::ASTContext& context)
         {
-            static bool insertBufferIncludeLine = true;
-
             for (const auto& target : proxyClassTargets)
             {
                 const clang::SourceLocation includeLocation = target->sourceManager.getIncludeLoc(target->fileId);
@@ -1567,12 +1244,7 @@ namespace TRAFO_NAMESPACE
 
                 clang::RewriteBuffer& rewriteBuffer = rewriter.getEditBuffer(target->sourceManager.getFileID(includeLocation));
                 rewriteBuffer.ReplaceText(target->sourceManager.getFileOffset(includeLineBegin), includeLineLength, std::string("#include \"") + target->name + std::string(".hpp\""));
-
-                if (insertBufferIncludeLine)
-                {
-                    rewriteBuffer.InsertTextBefore(target->sourceManager.getFileOffset(includeLineBegin), std::string("#include <buffer/buffer.hpp>\n"));
-                    //insertBufferIncludeLine = false;
-                }
+                rewriteBuffer.InsertTextBefore(target->sourceManager.getFileOffset(includeLineBegin), std::string("#include <buffer/buffer.hpp>\n"));
             }
         }
 
@@ -1584,7 +1256,6 @@ namespace TRAFO_NAMESPACE
             for (const auto& declaration : declarations)
             {
                 declaration->printInfo(context.getSourceManager());
-                //std::cout << declaration->sourceRange.printToString(context.getSourceManager()) << std::endl;
 
                 const clang::SourceLocation declBegin = declaration->sourceRange.getBegin();
                 const clang::SourceLocation declEnd = declaration->sourceRange.getEnd().getLocWithOffset(1);
@@ -1595,7 +1266,6 @@ namespace TRAFO_NAMESPACE
                 outputFiles.insert(fileId);
 
                 std::stringstream newDeclaration;
-                //newDeclaration << "XXX_NAMESPACE::buffer<" << declaration->elementDataTypeNamespace << declaration->elementDataTypeName << ", ";
                 newDeclaration << "XXX_NAMESPACE::buffer<" << declaration->elementDataType.getAsString() << ", ";
                 newDeclaration << declaration->getNestingLevel() + 1 << ", ";
                 newDeclaration << "XXX_NAMESPACE::data_layout::SoA> ";

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Florian Wende (flwende@gmail.com)
+// Copyright (c) 2017-2019 Florian Wende (flwende@gmail.com)
 //
 // Distributed under the BSD 2-clause Software License
 // (See accompanying file LICENSE)
@@ -109,10 +109,8 @@ namespace TRAFO_NAMESPACE
                     return (qualType.getAsString().find("const", 0, 5) != std::string::npos);
                 }
 
-                //static std::string getTypeName(const clang::ParmVarDecl& decl, const Definition* definition = nullptr, const bool getElementTypeName = false)
                 static std::string getTypeName(const clang::QualType& qualType, const Definition* definition = nullptr, const bool getElementTypeName = false)
                 {
-                    //const clang::QualType qualType = decl.getType();
                     std::string typeName = (getElementTypeName ? qualType.getUnqualifiedType().getNonReferenceType().getAsString() : qualType.getAsString());
                     
                     if (getElementTypeName)
@@ -168,8 +166,6 @@ namespace TRAFO_NAMESPACE
                     decl(decl),
                     sourceRange(getSpellingSourceRange(decl.getSourceRange(), decl.getASTContext())),
                     name(decl.getNameAsString()),
-                    //typeName(getTypeName(decl, definition)),
-                    //elementTypeName(getTypeName(decl, definition, true)),
                     typeName(getTypeName(decl.getType(), definition)),
                     elementTypeName(getTypeName(decl.getType(), definition, true)),
                     templateParameters(getTemplateParameters(decl, definition)),
@@ -1239,7 +1235,6 @@ namespace TRAFO_NAMESPACE
                 containsProxyClassCandidates(false),
                 topMostSourceLocation(sourceManager.getLocForEndOfFile(fileId)),
                 bottomMostSourceLocation(sourceManager.getLocForStartOfFile(fileId)),
-                //filename(sourceManager.getFilename(topMostSourceLocation).str())
                 filename(sourceManager.getFilename(decl.getLocation()).str())
             { ; }
 
