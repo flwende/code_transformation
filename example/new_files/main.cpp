@@ -36,7 +36,8 @@ int main(int argc, char** argv)
     XXX_NAMESPACE::buffer<vec_t, 1, XXX_NAMESPACE::data_layout::SoA> field_1{{n}};
     XXX_NAMESPACE::buffer<vec_t, 2, XXX_NAMESPACE::data_layout::SoA> field_x{{5, 13}};
     XXX_NAMESPACE::buffer<vec_t, 2, XXX_NAMESPACE::data_layout::SoA> field_y{{34, 7}};
-    XXX_NAMESPACE::buffer<tuple_t, 1, XXX_NAMESPACE::data_layout::SoA> field_2{{n}};
+    //std::vector<tuple_t> field_2(n);
+    XXX_NAMESPACE::buffer<tuple_t, 1, XXX_NAMESPACE::data_layout::SoA> field_2{{16}};
     XXX_NAMESPACE::buffer<tuple_t, 1, XXX_NAMESPACE::data_layout::SoA> field_3{{n}};
 
     srand48(1);
@@ -58,3 +59,4 @@ int main(int argc, char** argv)
 
     return 0;
 }
+

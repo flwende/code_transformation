@@ -34,7 +34,8 @@ int main(int argc, char** argv)
     std::vector<vec_t> field_1(n);
     vec_t field_x[13][5];
     std::array<std::array<vec_t, 34>, 7> field_y;
-    std::vector<tuple_t> field_2(n);
+    //std::vector<tuple_t> field_2(n);
+    std::array<tuple_t, 16> field_2;
     std::vector<tuple_t> field_3(n);
 
     srand48(1);
@@ -56,3 +57,4 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
